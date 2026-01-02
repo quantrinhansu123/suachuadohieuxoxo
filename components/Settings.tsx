@@ -1,0 +1,335 @@
+import React, { useState } from 'react';
+import { 
+  Building2, Users, Wallet, Upload, Check, Save, 
+  Palette, Smartphone, Mail, Globe, MapPin, Shield,
+  Database, RefreshCw
+} from 'lucide-react';
+import { ref, set } from 'firebase/database';
+import { db, DB_PATHS } from '../firebase';
+import { 
+  DEFAULT_COMPANY_CONFIG, MOCK_ROLES, MOCK_SALARIES, 
+  MOCK_ORDERS, MOCK_INVENTORY, MOCK_CUSTOMERS, 
+  SERVICE_CATALOG, MOCK_PRODUCTS, MOCK_MEMBERS, MOCK_WORKFLOWS 
+} from '../constants';
+import { ServiceType } from '../types';
+
+export const Settings: React.FC = () => {
+  const [activeTab, setActiveTab] = useState<'GENERAL' | 'ROLES' | 'SALARY' | 'DATABASE'>('GENERAL');
+  const [isSeeding, setIsSeeding] = useState(false);
+  
+  // Local state to simulate form handling
+  const [companyInfo, setCompanyInfo] = useState(DEFAULT_COMPANY_CONFIG);
+  const [themeColor, setThemeColor] = useState(DEFAULT_COMPANY_CONFIG.themeColor);
+
+  const handleSeedDatabase = async () => {
+    if (!window.confirm("Hành động này sẽ ghi đè toàn bộ dữ liệu mẫu lên Database của bạn. Bạn có chắc chắn không?")) return;
+    
+    setIsSeeding(true);
+    try {
+      // 1. Seed Orders
+      const ordersMap = MOCK_ORDERS.reduce((acc, order) => ({...acc, [order.id]: order}), {});
+      await set(ref(db, DB_PATHS.ORDERS), ordersMap);
+
+      // 2. Seed Inventory
+      const invMap = MOCK_INVENTORY.reduce((acc, item) => ({...acc, [item.id]: item}), {});
+      await set(ref(db, DB_PATHS.INVENTORY), invMap);
+
+      // 3. Seed Customers
+      const custMap = MOCK_CUSTOMERS.reduce((acc, item) => ({...acc, [item.id]: item}), {});
+      await set(ref(db, DB_PATHS.CUSTOMERS), custMap);
+
+      // 4. Seed Services
+      const svcMap = SERVICE_CATALOG.reduce((acc, item) => ({...acc, [item.id]: item}), {});
+      await set(ref(db, DB_PATHS.SERVICES), svcMap);
+
+      // 5. Seed Products
+      const prodMap = MOCK_PRODUCTS.reduce((acc, item) => ({...acc, [item.id]: item}), {});
+      await set(ref(db, DB_PATHS.PRODUCTS), prodMap);
+
+      // 6. Seed Workflows & Members
+      const wfMap = MOCK_WORKFLOWS.reduce((acc, item) => ({...acc, [item.id]: item}), {});
+      await set(ref(db, DB_PATHS.WORKFLOWS), wfMap);
+      
+      const memMap = MOCK_MEMBERS.reduce((acc, item) => ({...acc, [item.id]: item}), {});
+      await set(ref(db, DB_PATHS.MEMBERS), memMap);
+
+      alert("Đã khởi tạo Database thành công với tên bảng Tiếng Việt!");
+    } catch (error) {
+      console.error(error);
+      alert("Lỗi khi khởi tạo: " + error);
+    } finally {
+      setIsSeeding(false);
+    }
+  };
+
+  const TABS = [
+    { id: 'GENERAL', label: 'Thông Tin Chung', icon: Building2 },
+    { id: 'ROLES', label: 'Phân Quyền', icon: Shield },
+    { id: 'SALARY', label: 'Lương & Chi Phí', icon: Wallet },
+    { id: 'DATABASE', label: 'Cơ Sở Dữ Liệu', icon: Database },
+  ];
+
+  return (
+    <div className="space-y-6">
+      <div className="flex flex-col sm:flex-row justify-between items-start sm:items-center gap-4">
+        <div>
+          <h1 className="text-2xl font-serif font-bold text-slate-100">Cài Đặt Hệ Thống</h1>
+          <p className="text-slate-500 mt-1">Quản lý thông tin công ty, phân quyền và cấu hình tài chính.</p>
+        </div>
+        <button className="flex items-center gap-2 bg-gold-600 hover:bg-gold-700 text-black font-medium px-6 py-2.5 rounded-lg shadow-lg shadow-gold-900/20 transition-all">
+          <Save size={18} />
+          <span>Lưu Thay Đổi</span>
+        </button>
+      </div>
+
+      <div className="flex flex-col lg:flex-row gap-8">
+        {/* Settings Navigation */}
+        <div className="w-full lg:w-64 flex-shrink-0">
+           <div className="bg-neutral-900 rounded-xl shadow-lg shadow-black/20 border border-neutral-800 overflow-hidden sticky top-24">
+              {TABS.map((tab) => (
+                <button
+                  key={tab.id}
+                  onClick={() => setActiveTab(tab.id as any)}
+                  className={`w-full flex items-center gap-3 px-4 py-4 font-medium transition-colors text-left ${
+                    activeTab === tab.id 
+                      ? 'bg-neutral-800 text-gold-500 border-r-4 border-gold-500' 
+                      : 'text-slate-500 hover:bg-neutral-800 hover:text-slate-300'
+                  }`}
+                >
+                  <tab.icon size={20} />
+                  {tab.label}
+                </button>
+              ))}
+           </div>
+        </div>
+
+        {/* Content Area */}
+        <div className="flex-1 space-y-6">
+          
+          {/* --- TAB 1: GENERAL SETTINGS --- */}
+          {activeTab === 'GENERAL' && (
+            <div className="bg-neutral-900 rounded-xl shadow-lg shadow-black/20 border border-neutral-800 p-8 space-y-8 animate-in fade-in slide-in-from-bottom-4 duration-500">
+              {/* Branding Section */}
+              <div>
+                <h3 className="text-lg font-bold text-slate-200 mb-6 flex items-center gap-2 pb-2 border-b border-neutral-800">
+                  <Palette size={20} className="text-gold-500" />
+                  Thương Hiệu & Giao Diện
+                </h3>
+                
+                <div className="flex flex-col md:flex-row gap-8 items-start">
+                  <div className="flex flex-col items-center gap-3">
+                    <div className="w-32 h-32 rounded-xl bg-neutral-800 border-2 border-dashed border-neutral-700 flex items-center justify-center text-slate-500 relative overflow-hidden group cursor-pointer hover:border-gold-500 hover:text-gold-500 transition-colors">
+                       <img src={companyInfo.logoUrl} alt="Logo" className="w-full h-full object-cover opacity-50 group-hover:opacity-30 transition-opacity" />
+                       <div className="absolute inset-0 flex flex-col items-center justify-center">
+                          <Upload size={24} />
+                          <span className="text-xs mt-1">Tải logo</span>
+                       </div>
+                    </div>
+                    <span className="text-xs text-slate-500">Định dạng: PNG, JPG (Max 2MB)</span>
+                  </div>
+
+                  <div className="flex-1 space-y-4 w-full">
+                    <div>
+                      <label className="block text-sm font-medium text-slate-400 mb-1">Tên Công Ty / Thương Hiệu</label>
+                      <input 
+                        type="text" 
+                        value={companyInfo.name} 
+                        onChange={(e) => setCompanyInfo({...companyInfo, name: e.target.value})}
+                        className="w-full p-2.5 border border-neutral-700 rounded-lg focus:ring-1 focus:ring-gold-500 outline-none bg-neutral-950 text-slate-200" 
+                      />
+                    </div>
+                    <div>
+                       <label className="block text-sm font-medium text-slate-400 mb-1">Slogan</label>
+                       <input 
+                         type="text" 
+                         value={companyInfo.slogan}
+                         onChange={(e) => setCompanyInfo({...companyInfo, slogan: e.target.value})}
+                         className="w-full p-2.5 border border-neutral-700 rounded-lg focus:ring-1 focus:ring-gold-500 outline-none bg-neutral-950 text-slate-200" 
+                       />
+                    </div>
+                    <div>
+                       <label className="block text-sm font-medium text-slate-400 mb-2">Màu Chủ Đề</label>
+                       <div className="flex gap-3">
+                          {['#c68a35', '#2563eb', '#dc2626', '#16a34a', '#4f46e5'].map(color => (
+                            <button 
+                              key={color}
+                              onClick={() => setThemeColor(color)}
+                              className={`w-8 h-8 rounded-full border-2 flex items-center justify-center transition-transform hover:scale-110 ${themeColor === color ? 'border-white' : 'border-transparent'}`}
+                              style={{ backgroundColor: color }}
+                            >
+                              {themeColor === color && <Check size={14} className="text-white" />}
+                            </button>
+                          ))}
+                       </div>
+                    </div>
+                  </div>
+                </div>
+              </div>
+
+              {/* Contact Info */}
+              <div>
+                <h3 className="text-lg font-bold text-slate-200 mb-6 flex items-center gap-2 pb-2 border-b border-neutral-800">
+                  <Building2 size={20} className="text-gold-500" />
+                  Thông Tin Liên Hệ (Hiển thị trên hóa đơn)
+                </h3>
+                <div className="grid grid-cols-1 md:grid-cols-2 gap-6">
+                  <div>
+                     <label className="block text-sm font-medium text-slate-400 mb-1 flex items-center gap-2"><MapPin size={14}/> Địa chỉ trụ sở</label>
+                     <input type="text" value={companyInfo.address} className="w-full p-2.5 border border-neutral-700 rounded-lg focus:ring-1 focus:ring-gold-500 outline-none bg-neutral-950 text-slate-200" />
+                  </div>
+                  <div>
+                     <label className="block text-sm font-medium text-slate-400 mb-1 flex items-center gap-2"><Smartphone size={14}/> Hotline</label>
+                     <input type="text" value={companyInfo.phone} className="w-full p-2.5 border border-neutral-700 rounded-lg focus:ring-1 focus:ring-gold-500 outline-none bg-neutral-950 text-slate-200" />
+                  </div>
+                  <div>
+                     <label className="block text-sm font-medium text-slate-400 mb-1 flex items-center gap-2"><Mail size={14}/> Email</label>
+                     <input type="text" value={companyInfo.email} className="w-full p-2.5 border border-neutral-700 rounded-lg focus:ring-1 focus:ring-gold-500 outline-none bg-neutral-950 text-slate-200" />
+                  </div>
+                  <div>
+                     <label className="block text-sm font-medium text-slate-400 mb-1 flex items-center gap-2"><Globe size={14}/> Website</label>
+                     <input type="text" value={companyInfo.website} className="w-full p-2.5 border border-neutral-700 rounded-lg focus:ring-1 focus:ring-gold-500 outline-none bg-neutral-950 text-slate-200" />
+                  </div>
+                </div>
+              </div>
+            </div>
+          )}
+
+          {/* --- TAB 2: ROLES & PERMISSIONS --- */}
+          {activeTab === 'ROLES' && (
+            <div className="bg-neutral-900 rounded-xl shadow-lg shadow-black/20 border border-neutral-800 p-8 space-y-6 animate-in fade-in slide-in-from-bottom-4 duration-500">
+               <div className="flex justify-between items-center mb-4">
+                  <h3 className="text-lg font-bold text-slate-200">Phân Quyền Hệ Thống</h3>
+                  <button className="text-sm bg-slate-100 text-black px-3 py-1.5 rounded-lg hover:bg-white font-medium">Thêm Vai Trò</button>
+               </div>
+               
+               <div className="overflow-x-auto">
+                 <table className="w-full text-left border-collapse">
+                    <thead>
+                      <tr className="bg-neutral-800/50 border-b border-neutral-800">
+                        <th className="p-4 font-semibold text-slate-400 min-w-[150px]">Vị Trí / Chức Năng</th>
+                        <th className="p-4 font-semibold text-slate-400 text-center">Dashboard</th>
+                        <th className="p-4 font-semibold text-slate-400 text-center">Khách Hàng</th>
+                        <th className="p-4 font-semibold text-slate-400 text-center">Đơn Hàng</th>
+                        <th className="p-4 font-semibold text-slate-400 text-center">Kho Vận</th>
+                        <th className="p-4 font-semibold text-slate-400 text-center">Cài Đặt</th>
+                      </tr>
+                    </thead>
+                    <tbody className="divide-y divide-neutral-800">
+                      {MOCK_ROLES.map((role) => (
+                        <tr key={role.id} className="hover:bg-neutral-800 transition-colors">
+                          <td className="p-4 font-bold text-slate-200">{role.name}</td>
+                          <td className="p-4 text-center">
+                            <input type="checkbox" checked={role.permissions.dashboard} className="w-5 h-5 text-gold-600 rounded focus:ring-gold-500 border-neutral-600 bg-neutral-900 accent-gold-600" readOnly />
+                          </td>
+                          <td className="p-4 text-center">
+                            <input type="checkbox" checked={role.permissions.customers} className="w-5 h-5 text-gold-600 rounded focus:ring-gold-500 border-neutral-600 bg-neutral-900 accent-gold-600" readOnly />
+                          </td>
+                          <td className="p-4 text-center">
+                            <input type="checkbox" checked={role.permissions.orders} className="w-5 h-5 text-gold-600 rounded focus:ring-gold-500 border-neutral-600 bg-neutral-900 accent-gold-600" readOnly />
+                          </td>
+                          <td className="p-4 text-center">
+                            <input type="checkbox" checked={role.permissions.inventory} className="w-5 h-5 text-gold-600 rounded focus:ring-gold-500 border-neutral-600 bg-neutral-900 accent-gold-600" readOnly />
+                          </td>
+                          <td className="p-4 text-center">
+                            <input type="checkbox" checked={role.permissions.settings} className="w-5 h-5 text-gold-600 rounded focus:ring-gold-500 border-neutral-600 bg-neutral-900 accent-gold-600" readOnly />
+                          </td>
+                        </tr>
+                      ))}
+                    </tbody>
+                 </table>
+               </div>
+            </div>
+          )}
+
+          {/* --- TAB 3: SALARY & COSTS --- */}
+          {activeTab === 'SALARY' && (
+            <div className="bg-neutral-900 rounded-xl shadow-lg shadow-black/20 border border-neutral-800 p-8 space-y-6 animate-in fade-in slide-in-from-bottom-4 duration-500">
+               <h3 className="text-lg font-bold text-slate-200 mb-4">Cấu Hình Lương & Hoa Hồng</h3>
+               <p className="text-slate-500 text-sm mb-6">Thiết lập lương cơ bản và tỷ lệ hoa hồng (Commission) cho từng vị trí dựa trên loại dịch vụ.</p>
+
+               <div className="space-y-8">
+                 {MOCK_SALARIES.map((salary) => {
+                   const roleName = MOCK_ROLES.find(r => r.id === salary.roleId)?.name || salary.roleId;
+                   
+                   return (
+                     <div key={salary.roleId} className="border border-neutral-800 rounded-xl p-6 bg-neutral-800/30">
+                        <div className="flex justify-between items-center mb-4">
+                           <h4 className="font-bold text-slate-200 text-lg">{roleName}</h4>
+                           <button className="text-gold-500 text-sm font-medium hover:underline">Chỉnh sửa</button>
+                        </div>
+                        
+                        <div className="grid grid-cols-1 md:grid-cols-2 gap-6 mb-6">
+                           <div>
+                              <label className="text-xs font-semibold text-slate-500 uppercase">Lương Cơ Bản</label>
+                              <div className="text-lg font-mono font-medium text-slate-200">{salary.baseSalary.toLocaleString()} ₫</div>
+                           </div>
+                           <div>
+                              <label className="text-xs font-semibold text-slate-500 uppercase">Phụ Cấp</label>
+                              <div className="text-lg font-mono font-medium text-slate-200">{salary.allowance.toLocaleString()} ₫</div>
+                           </div>
+                        </div>
+
+                        <div className="bg-neutral-900 rounded-lg border border-neutral-800 overflow-hidden">
+                           <div className="px-4 py-2 bg-neutral-800 border-b border-neutral-700 text-xs font-bold text-slate-400 uppercase">
+                             Tỷ lệ hoa hồng theo dịch vụ
+                           </div>
+                           <div className="divide-y divide-neutral-800">
+                              {Object.entries(salary.commissionRate).map(([type, rate]) => (
+                                <div key={type} className="flex justify-between px-4 py-3">
+                                   <span className="text-sm font-medium text-slate-400">Dịch vụ {type}</span>
+                                   <span className="text-sm font-bold text-emerald-500">{rate}%</span>
+                                </div>
+                              ))}
+                           </div>
+                        </div>
+                     </div>
+                   );
+                 })}
+               </div>
+            </div>
+          )}
+
+           {/* --- TAB 4: DATABASE --- */}
+           {activeTab === 'DATABASE' && (
+            <div className="bg-neutral-900 rounded-xl shadow-lg shadow-black/20 border border-neutral-800 p-8 space-y-6 animate-in fade-in slide-in-from-bottom-4 duration-500">
+               <div className="flex items-center gap-3 mb-6 pb-4 border-b border-neutral-800">
+                  <Database size={24} className="text-gold-500" />
+                  <div>
+                    <h3 className="text-lg font-bold text-slate-200">Quản Lý Database (Firebase)</h3>
+                    <p className="text-sm text-slate-500">Cấu hình kết nối và dữ liệu mẫu.</p>
+                  </div>
+               </div>
+
+               <div className="bg-blue-900/10 border border-blue-900/30 rounded-lg p-4 mb-6">
+                 <h4 className="font-bold text-blue-400 mb-2">Trạng thái kết nối</h4>
+                 <div className="text-sm text-slate-300">
+                    <p>URL: <span className="font-mono text-slate-400">https://xoxo-b2c0d-default-rtdb.asia-southeast1.firebasedatabase.app/</span></p>
+                    <p className="mt-1 flex items-center gap-2">
+                      <span className="w-2 h-2 bg-emerald-500 rounded-full animate-pulse"></span>
+                      Đang kết nối Realtime
+                    </p>
+                 </div>
+               </div>
+
+               <div>
+                 <h4 className="font-bold text-slate-200 mb-2">Khởi tạo dữ liệu</h4>
+                 <p className="text-sm text-slate-500 mb-4">
+                   Nếu database của bạn đang trống, hãy nhấn nút dưới đây để tạo cấu trúc bảng (Tiếng Việt) và nạp dữ liệu mẫu ban đầu.
+                 </p>
+                 <button 
+                   onClick={handleSeedDatabase}
+                   disabled={isSeeding}
+                   className="flex items-center gap-2 px-5 py-3 bg-neutral-800 hover:bg-gold-600 hover:text-black text-slate-300 rounded-lg font-medium transition-all disabled:opacity-50"
+                 >
+                   {isSeeding ? <RefreshCw size={18} className="animate-spin" /> : <Database size={18} />}
+                   {isSeeding ? 'Đang khởi tạo...' : 'Khởi tạo / Reset Database Ngay'}
+                 </button>
+                 <p className="text-xs text-red-500 mt-2 italic">* Lưu ý: Hành động này sẽ xóa các dữ liệu cũ nếu trùng ID.</p>
+               </div>
+            </div>
+          )}
+        </div>
+      </div>
+    </div>
+  );
+};
