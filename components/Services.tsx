@@ -1,4 +1,5 @@
 import React, { useState, useMemo, useRef, useEffect } from 'react';
+import { createPortal } from 'react-dom';
 import { Search, Plus, Filter, MoreHorizontal, Layers, Briefcase, Tag, Eye, Edit, Trash2, ArrowUp, ArrowDown, GripVertical, ChevronRight, ChevronDown, FolderOpen, Folder } from 'lucide-react';
 import { SERVICE_CATALOG, MOCK_WORKFLOWS } from '../constants';
 import { TableFilter, FilterState } from './TableFilter';
@@ -139,7 +140,7 @@ const CATEGORY_TREE: ServiceCategory[] = [
   }
 ];
 
-// Action Menu Component
+// Action Menu Component around Portal
 const ActionMenu: React.FC<{
   onView: () => void;
   onEdit: () => void;
@@ -147,70 +148,71 @@ const ActionMenu: React.FC<{
   itemName: string;
 }> = ({ onView, onEdit, onDelete, itemName }) => {
   const [isOpen, setIsOpen] = useState(false);
-  const menuRef = useRef<HTMLDivElement>(null);
+  const buttonRef = useRef<HTMLButtonElement>(null);
+  const [coords, setCoords] = useState({ top: 0, left: 0 });
+
+  const toggleMenu = (e: React.MouseEvent) => {
+    e.stopPropagation();
+    if (!isOpen && buttonRef.current) {
+      const rect = buttonRef.current.getBoundingClientRect();
+      setCoords({
+        top: rect.bottom + 4,
+        left: rect.right - 150
+      });
+    }
+    setIsOpen(!isOpen);
+  };
 
   useEffect(() => {
-    const handleClickOutside = (event: MouseEvent) => {
-      if (menuRef.current && !menuRef.current.contains(event.target as Node)) {
-        setIsOpen(false);
-      }
+    const handleScroll = () => { if (isOpen) setIsOpen(false); };
+    window.addEventListener('scroll', handleScroll, true);
+    window.addEventListener('resize', handleScroll);
+    return () => {
+      window.removeEventListener('scroll', handleScroll, true);
+      window.removeEventListener('resize', handleScroll);
     };
-    document.addEventListener('mousedown', handleClickOutside);
-    return () => document.removeEventListener('mousedown', handleClickOutside);
-  }, []);
+  }, [isOpen]);
 
   return (
-    <div className="relative" ref={menuRef}>
+    <>
       <button
-        onClick={(e) => {
-          e.stopPropagation();
-          setIsOpen(!isOpen);
-        }}
+        ref={buttonRef}
+        onClick={toggleMenu}
         className="p-2 hover:bg-neutral-800 rounded-lg text-slate-500 hover:text-slate-300 transition-colors"
       >
         <MoreHorizontal size={20} />
       </button>
 
-      {isOpen && (
-        <div className="absolute right-0 top-full mt-1 bg-neutral-800 border border-neutral-700 rounded-lg shadow-xl z-50 min-w-[140px] overflow-hidden">
-          <button
-            onClick={(e) => {
-              e.stopPropagation();
-              onView();
-              setIsOpen(false);
-            }}
-            className="w-full px-4 py-2.5 text-left text-sm text-slate-300 hover:bg-neutral-700 flex items-center gap-2 transition-colors"
+      {isOpen && createPortal(
+        <>
+          <div className="fixed inset-0 z-[9998]" onClick={(e) => { e.stopPropagation(); setIsOpen(false); }} />
+          <div
+            className="fixed bg-neutral-800 border border-neutral-700 rounded-lg shadow-xl z-[9999] w-[150px] overflow-hidden"
+            style={{ top: coords.top, left: coords.left }}
           >
-            <Eye size={16} />
-            Xem
-          </button>
-          <button
-            onClick={(e) => {
-              e.stopPropagation();
-              onEdit();
-              setIsOpen(false);
-            }}
-            className="w-full px-4 py-2.5 text-left text-sm text-slate-300 hover:bg-neutral-700 flex items-center gap-2 transition-colors"
-          >
-            <Edit size={16} />
-            Sửa
-          </button>
-          <button
-            onClick={(e) => {
-              e.stopPropagation();
-              if (window.confirm(`Bạn có chắc chắn muốn xóa "${itemName}"?`)) {
-                onDelete();
-              }
-              setIsOpen(false);
-            }}
-            className="w-full px-4 py-2.5 text-left text-sm text-red-400 hover:bg-red-900/20 flex items-center gap-2 transition-colors"
-          >
-            <Trash2 size={16} />
-            Xóa
-          </button>
-        </div>
+            <button
+              onClick={(e) => { e.stopPropagation(); onView(); setIsOpen(false); }}
+              className="w-full px-4 py-2.5 text-left text-sm text-slate-300 hover:bg-neutral-700 flex items-center gap-2 transition-colors"
+            >
+              <Eye size={16} /> Xem
+            </button>
+            <button
+              onClick={(e) => { e.stopPropagation(); onEdit(); setIsOpen(false); }}
+              className="w-full px-4 py-2.5 text-left text-sm text-slate-300 hover:bg-neutral-700 flex items-center gap-2 transition-colors"
+            >
+              <Edit size={16} /> Sửa
+            </button>
+            <button
+              onClick={(e) => { e.stopPropagation(); if (window.confirm(`Xóa dịch vụ "${itemName}"?`)) onDelete(); setIsOpen(false); }}
+              className="w-full px-4 py-2.5 text-left text-sm text-red-400 hover:bg-red-900/20 flex items-center gap-2 transition-colors"
+            >
+              <Trash2 size={16} /> Xóa
+            </button>
+          </div>
+        </>,
+        document.body
       )}
-    </div>
+    </>
   );
 };
 
@@ -342,6 +344,18 @@ export const Services: React.FC = () => {
     return null;
   };
 
+  // Helper tìm path từ ID category
+  const findCategoryPathById = (id: string, nodes: ServiceCategory[]): string[] | null => {
+    for (const node of nodes) {
+      if (node.id === id) return [node.id];
+      if (node.children) {
+        const childPath = findCategoryPathById(id, node.children);
+        if (childPath) return [node.id, ...childPath];
+      }
+    }
+    return null;
+  };
+
   // Helper lấy danh sách category con dựa trên path
   const getCategoriesAtLevel = (level: number): ServiceCategory[] => {
     if (level === 0) return CATEGORY_TREE;
@@ -414,10 +428,12 @@ export const Services: React.FC = () => {
           Object.keys(data).forEach(key => {
             const svc = data[key];
             const serviceId = svc.id || key;
+            const catPath = svc.categoryPath || findCategoryPathByName(svc.category || '', CATEGORY_TREE);
             mergedServices.set(serviceId, {
               id: serviceId,
               name: svc.name || '',
               category: svc.category || '',
+              categoryPath: catPath || [],
               price: svc.price || 0,
               desc: svc.desc || '',
               image: svc.image || '',
@@ -450,10 +466,12 @@ export const Services: React.FC = () => {
           Object.keys(data).forEach(key => {
             const svc = data[key];
             const serviceId = svc.id || key;
+            const catPath = svc.categoryPath || findCategoryPathByName(svc.category || '', CATEGORY_TREE);
             mergedServices.set(serviceId, {
               id: serviceId,
               name: svc.name || '',
               category: svc.category || '',
+              categoryPath: catPath || [],
               price: svc.price || 0,
               desc: svc.desc || '',
               image: svc.image || '',
@@ -571,6 +589,13 @@ export const Services: React.FC = () => {
       result = result.filter(s => s.category === categoryFilter);
     }
 
+    if (selectedCategory) {
+      result = result.filter(s => {
+        if (!s.categoryPath) return false;
+        return s.categoryPath.includes(selectedCategory);
+      });
+    }
+
     return result;
   }, [services, searchText, categoryFilter, selectedCategory]);
 
@@ -592,6 +617,7 @@ export const Services: React.FC = () => {
         id: serviceId,
         name: newService.name,
         category: newService.category,
+        categoryPath: categoryPath,
         price: parseInt(newService.price),
         desc: newService.desc || '',
         image: newService.image || '',
@@ -659,7 +685,8 @@ export const Services: React.FC = () => {
     });
 
     // Khôi phục path cho edit modal
-    const path = findCategoryPathByName(service.category, CATEGORY_TREE);
+    // Khôi phục path cho edit modal
+    const path = service.categoryPath || findCategoryPathByName(service.category, CATEGORY_TREE);
     if (path) {
       setCategoryPath(path);
       setCustomLevels({});
@@ -693,6 +720,7 @@ export const Services: React.FC = () => {
         id: selectedService.id,
         name: newService.name,
         category: newService.category,
+        categoryPath: categoryPath,
         price: parseInt(newService.price),
         desc: newService.desc || '',
         workflows: newService.workflows.sort((a, b) => a.order - b.order),
@@ -1480,36 +1508,64 @@ export const Services: React.FC = () => {
             </div>
           </div>
         )}
-        <div className="flex flex-col sm:flex-row justify-between items-start sm:items-center gap-4">
-          <div>
-            <h1 className="text-2xl font-serif font-bold text-slate-100">Danh Mục Dịch Vụ</h1>
-            <p className="text-slate-500 mt-1">Quản lý giá, mô tả và gán quy trình xử lý cho từng dịch vụ.</p>
-          </div>
-          <button
-            onClick={() => {
-              setCategoryPath([]);
-              setShowAddModal(true);
-            }}
-            className="flex items-center gap-2 bg-gold-600 hover:bg-gold-700 text-black font-medium px-4 py-2.5 rounded-lg shadow-lg shadow-gold-900/20 transition-all"
-          >
-            <Plus size={18} />
-            <span>Thêm Dịch Vụ</span>
-          </button>
-        </div>
+        <div className="bg-neutral-900 rounded-xl shadow-sm border border-neutral-800 p-4 space-y-4 flex-shrink-0">
+          {/* ROW 1: Search & Actions */}
+          <div className="flex flex-col sm:flex-row gap-4 items-center">
+            <div className="relative flex-1 w-full">
+              <Search className="absolute left-3 top-1/2 -translate-y-1/2 text-slate-500" size={18} />
+              <input
+                type="text"
+                placeholder="Tìm kiếm dịch vụ (Tên, Mô tả...)"
+                value={searchText}
+                onChange={(e) => setSearchText(e.target.value)}
+                className="w-full pl-10 pr-4 py-2.5 bg-neutral-800 border border-neutral-700 rounded-lg text-slate-200 focus:ring-1 focus:ring-gold-500 outline-none transition-all placeholder-slate-600"
+              />
+            </div>
 
-        {/* Filters */}
-        <div className="bg-neutral-900 p-4 rounded-xl shadow-lg shadow-black/20 border border-neutral-800 flex flex-col sm:flex-row gap-4">
-          <div className="relative flex-1 max-w-md">
-            <Search className="absolute left-3 top-1/2 -translate-y-1/2 text-slate-500" size={20} />
-            <input
-              type="text"
-              placeholder="Tìm kiếm dịch vụ..."
-              value={searchText}
-              onChange={(e) => setSearchText(e.target.value)}
-              className="w-full pl-10 pr-4 py-2 bg-neutral-800 border border-neutral-700 rounded-lg text-slate-200 focus:ring-1 focus:ring-gold-500 outline-none placeholder-slate-600"
-            />
+            <div className="flex gap-2 w-full sm:w-auto">
+              <button
+                onClick={() => {
+                  let initialCategory = '';
+                  let initialPath: string[] = [];
+
+                  if (selectedCategory) {
+                    const path = findCategoryPathById(selectedCategory, CATEGORY_TREE);
+                    if (path) {
+                      initialPath = path;
+                      // Tìm tên category cuối cùng trong path để điền vào newService
+                      let currentNodes = CATEGORY_TREE;
+                      for (const pid of path) {
+                        const node = currentNodes.find(n => n.id === pid);
+                        if (node) {
+                          initialCategory = node.name;
+                          currentNodes = node.children || [];
+                        }
+                      }
+                    }
+                  }
+
+                  setNewService({
+                    name: '',
+                    category: initialCategory,
+                    image: '',
+                    price: '',
+                    desc: '',
+                    workflows: []
+                  });
+                  setCategoryPath(initialPath);
+                  setCustomLevels({});
+                  setShowAddModal(true);
+                }}
+                className="flex items-center gap-2 bg-gold-600 hover:bg-gold-700 text-black font-medium px-4 py-2.5 rounded-lg shadow-lg shadow-gold-900/20 transition-all font-bold"
+              >
+                <Plus size={18} />
+                <span className="hidden sm:inline">Thêm Dịch Vụ</span>
+              </button>
+            </div>
           </div>
-          <div className="flex gap-2 flex-wrap items-center">
+
+          {/* ROW 2: Filters */}
+          <div className="flex flex-wrap gap-2 pt-2 border-t border-neutral-800">
             <TableFilter onFilterChange={setFilter} />
             <select
               value={categoryFilter}
@@ -1521,34 +1577,40 @@ export const Services: React.FC = () => {
                 <option key={cat} value={cat}>{cat}</option>
               ))}
             </select>
-
           </div>
         </div>
 
         {/* Services List by Tier */}
-        {isLoading ? (
-          <div className="flex items-center justify-center h-64">
-            <div className="text-slate-500">Đang tải dịch vụ...</div>
-          </div>
-        ) : (
-          <div className="space-y-6">
-            {filteredServices.length === 0 ? (
-              <div className="bg-neutral-900 p-8 rounded-xl shadow-lg shadow-black/20 border border-neutral-800 text-center text-slate-500">
-                Không tìm thấy dịch vụ nào phù hợp với bộ lọc
-              </div>
-            ) : (
-              <div className="grid grid-cols-1 gap-4">
-                {filteredServices.map((service) => {
-                  // Xử lý workflows có thể là mảng object {id, order} hoặc mảng string
-                  let svcWorkflows: Array<{ id: string; order: number }> = [];
+        {/* Services Table Layout */}
+        <div className="bg-neutral-900 rounded-xl shadow-lg shadow-black/20 border border-neutral-800 flex flex-col overflow-hidden min-h-0 flex-1">
+          <div className="overflow-auto flex-1 h-[600px]">
+            <table className="w-full text-left border-collapse relative">
+              <thead className="sticky top-0 z-20 bg-neutral-900 shadow-sm">
+                <tr className="border-b border-neutral-800 text-slate-500 text-xs font-bold uppercase tracking-wider bg-neutral-800/50">
+                  <th className="p-4 w-12 text-center">#</th>
+                  <th className="p-4 min-w-[200px]">Dịch Vụ</th>
+                  <th className="p-4">Danh Mục</th>
+                  <th className="p-4">Quy Trình</th>
+                  <th className="p-4 text-right">Đơn Giá</th>
+                  <th className="p-4 w-12 sticky right-0 bg-neutral-900 z-30"></th>
+                </tr>
+              </thead>
+              <tbody className="divide-y divide-neutral-800">
+                {isLoading ? (
+                  <tr><td colSpan={6} className="p-12 text-center text-slate-500">Đang tải dịch vụ...</td></tr>
+                ) : filteredServices.length === 0 ? (
+                  <tr><td colSpan={6} className="p-12 text-center text-slate-500">Không tìm thấy dịch vụ nào phù hợp</td></tr>
+                ) : filteredServices.map((service, index) => {
 
+                  // Xử lý workflows logic
+                  let svcWorkflows: Array<{ id: string; order: number }> = [];
                   if (service.workflows && Array.isArray(service.workflows)) {
                     svcWorkflows = service.workflows;
                   } else {
                     const workflowIds = Array.isArray(service.workflowId)
                       ? service.workflowId
                       : [service.workflowId].filter(Boolean);
-                    svcWorkflows = workflowIds.map((id, index) => ({ id, order: index + 1 }));
+                    svcWorkflows = workflowIds.map((id, idx) => ({ id, order: idx + 1 }));
                   }
 
                   const sortedWorkflows = svcWorkflows
@@ -1557,59 +1619,62 @@ export const Services: React.FC = () => {
                     .filter(Boolean);
 
                   return (
-                    <div key={service.id} className="bg-neutral-900 p-4 rounded-xl shadow-lg shadow-black/20 border border-neutral-800 flex gap-6 items-center hover:border-gold-900/30 transition-all">
-                      <div className="w-24 h-24 rounded-lg bg-neutral-800 overflow-hidden flex-shrink-0 border border-neutral-700">
-                        <img src={service.image} alt={service.name} className="w-full h-full object-cover opacity-80" />
-                      </div>
-                      <div className="flex-1">
-                        <div className="flex justify-between items-start">
-                          <div>
-                            <h3 className="font-bold text-lg text-slate-100">{service.name}</h3>
-                            <div className="flex items-center gap-3 text-sm mt-1">
-                              <span className="text-slate-400 bg-neutral-800 px-2 py-0.5 rounded border border-neutral-700">{service.category}</span>
-                              <span className="font-mono text-slate-600 text-xs">#{service.id}</span>
-                            </div>
-                          </div>
-                          <ActionMenu
-                            itemName={service.name}
-                            onView={() => handleViewService(service)}
-                            onEdit={() => handleEditService(service)}
-                            onDelete={() => handleDeleteService(service)}
-                          />
-                        </div>
-                        <p className="text-slate-500 text-sm mt-2 line-clamp-1">{service.desc}</p>
-
-                        <div className="mt-4 flex items-center justify-between">
-                          <div className="flex items-center gap-2 flex-wrap">
-                            <span className="text-xs text-slate-500 uppercase font-semibold">Quy trình:</span>
-                            {sortedWorkflows.length > 0 ? (
-                              sortedWorkflows.map((workflow, idx) => {
-                                if (!workflow) return null;
-                                const workflowOrder = workflows.find(w => w.id === workflow.id)?.order || idx + 1;
-                                return (
-                                  <span key={workflow.id} className={`px-2 py-1 rounded-full text-xs font-bold flex items-center gap-1 border ${workflow.color}`}>
-                                    <span className="text-gold-500 font-mono">{workflowOrder}</span>
-                                    <Layers size={12} />
-                                    {workflow.label}
-                                  </span>
-                                );
-                              })
+                    <tr key={service.id} className="transition-colors cursor-pointer group hover:bg-neutral-800/50" onClick={() => handleViewService(service)}>
+                      <td className="p-4 text-center text-slate-600 text-xs">{index + 1}</td>
+                      <td className="p-4">
+                        <div className="flex items-center gap-4">
+                          <div className="w-12 h-12 rounded-lg border border-neutral-700 overflow-hidden bg-neutral-800 flex-shrink-0">
+                            {service.image ? (
+                              <img src={service.image} className="w-full h-full object-cover" alt={service.name} />
                             ) : (
-                              <span className="text-xs text-slate-500">Chưa gán quy trình</span>
+                              <div className="w-full h-full flex items-center justify-center text-slate-600"><Briefcase size={20} /></div>
                             )}
                           </div>
-                          <div className="font-bold text-lg text-gold-500">
-                            {service.price.toLocaleString()} ₫
+                          <div>
+                            <div className="font-bold text-slate-200">{service.name}</div>
+                            <div className="text-xs text-slate-500 font-mono mt-0.5">#{service.id}</div>
                           </div>
                         </div>
-                      </div>
-                    </div>
+                      </td>
+                      <td className="p-4">
+                        <span className="text-sm text-slate-300 bg-neutral-800 px-2 py-1 rounded border border-neutral-700">
+                          {service.category}
+                        </span>
+                      </td>
+                      <td className="p-4">
+                        <div className="flex flex-wrap gap-1">
+                          {sortedWorkflows.length > 0 ? (
+                            sortedWorkflows.map((workflow, idx) => {
+                              if (!workflow) return null;
+                              return (
+                                <span key={workflow.id} className={`px-2 py-0.5 rounded-full text-[10px] font-bold border flex items-center gap-1 ${workflow.color}`}>
+                                  {workflow.label}
+                                </span>
+                              );
+                            })
+                          ) : (
+                            <span className="text-xs text-slate-500 italic">--</span>
+                          )}
+                        </div>
+                      </td>
+                      <td className="p-4 text-right font-bold text-gold-400">
+                        {service.price.toLocaleString()} ₫
+                      </td>
+                      <td className="p-4 sticky right-0 bg-neutral-900/95 backdrop-blur-sm group-hover:bg-neutral-800 transition-colors z-20">
+                        <ActionMenu
+                          itemName={service.name}
+                          onView={() => handleViewService(service)}
+                          onEdit={() => handleEditService(service)}
+                          onDelete={() => handleDeleteService(service)}
+                        />
+                      </td>
+                    </tr>
                   );
                 })}
-              </div>
-            )}
+              </tbody>
+            </table>
           </div>
-        )}
+        </div>
       </div>
     </div>
   );

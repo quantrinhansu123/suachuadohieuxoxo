@@ -2,7 +2,7 @@ import React, { useState, useRef, useEffect } from 'react';
 import { Plus, GitMerge, MoreHorizontal, Settings, Layers, Building2, Package, X, Eye, Edit, Trash2, GripVertical, ArrowUp, ArrowDown, Columns, Users, CheckCircle2, Circle } from 'lucide-react';
 import { MOCK_WORKFLOWS, MOCK_INVENTORY, MOCK_MEMBERS } from '../constants';
 import { ServiceType, WorkflowDefinition, InventoryItem, WorkflowStage, WorkflowMaterial, Member, TodoStep } from '../types';
-import { ref, set, remove, get, onValue } from 'firebase/database';
+import { ref, set, remove, get, onValue, update } from 'firebase/database';
 import { db, DB_PATHS } from '../firebase';
 
 // Action Menu Component
@@ -262,12 +262,78 @@ export const Workflows: React.FC = () => {
                                        handleOpenConfig(wf);
                                     }}
                                     onDelete={async () => {
-                                       if (window.confirm(`Bạn có chắc chắn muốn xóa quy trình "${wf.label}"?\n\nHành động này không thể hoàn tác!`)) {
+                                       if (window.confirm(`CẢNH BÁO: BẠN SẮP XÓA QUY TRÌNH "${wf.label}"\n\nHành động này sẽ:\n- Xóa vĩnh viễn quy trình này.\n- Gỡ bỏ quy trình khỏi tất cả Dịch vụ đang sử dụng.\n- HỦY (Cancel) tất cả các công việc đang chạy trên quy trình này.\n\nBạn có chắc chắn muốn tiếp tục?`)) {
                                           try {
-                                             // Xóa từ Firebase với tên bảng tiếng Việt
-                                             await remove(ref(db, `${DB_PATHS.WORKFLOWS}/${wf.id}`));
-                                             alert(`Đã xóa quy trình: ${wf.label}\n\nĐã xóa khỏi Firebase!`);
-                                             // Workflows will be updated automatically via Firebase listener
+                                             // 1. Fetch data necessary for cascade
+                                             const [servicesSnap, ordersSnap] = await Promise.all([
+                                                get(ref(db, DB_PATHS.SERVICES)),
+                                                get(ref(db, DB_PATHS.ORDERS))
+                                             ]);
+
+                                             const updates: any = {};
+                                             updates[`${DB_PATHS.WORKFLOWS}/${wf.id}`] = null; // Mark workflow for deletion
+
+                                             // 2. Clean Services (Remove workflow reference)
+                                             if (servicesSnap.exists()) {
+                                                const services = servicesSnap.val();
+                                                Object.keys(services).forEach(svcKey => {
+                                                   const svc = services[svcKey];
+                                                   if (svc.workflows && Array.isArray(svc.workflows)) {
+                                                      const originalLen = svc.workflows.length;
+                                                      const newWorkflows = svc.workflows.filter((w: any) => w.id !== wf.id);
+                                                      if (newWorkflows.length !== originalLen) {
+                                                         updates[`${DB_PATHS.SERVICES}/${svcKey}/workflows`] = newWorkflows;
+                                                      }
+                                                   }
+                                                });
+                                             }
+
+                                             // 3. Cancel Active Orders/Tasks using this Workflow
+                                             if (ordersSnap.exists()) {
+                                                const orders = ordersSnap.val();
+                                                Object.keys(orders).forEach(orderKey => {
+                                                   const order = orders[orderKey];
+                                                   if (order.items && Array.isArray(order.items)) {
+                                                      let orderChanged = false;
+                                                      const newItems = order.items.map((item: any) => {
+                                                         // Check if active and uses this workflow
+                                                         // We check item.workflowId if present, or if item.status matches stage IDs?
+                                                         // Best to rely on workflowId if available, else fuzzy match stages.
+                                                         // Assuming workflowId is populated on creation.
+                                                         const isActive = item.status !== 'done' && item.status !== 'cancel';
+                                                         const usesWorkflow = item.workflowId === wf.id;
+
+                                                         if (isActive && usesWorkflow) {
+                                                            orderChanged = true;
+                                                            return {
+                                                               ...item,
+                                                               status: 'cancel',
+                                                               cancelReason: `System: Quy trình gốc (${wf.label}) đã bị xóa.`,
+                                                               history: [
+                                                                  ...(item.history || []),
+                                                                  {
+                                                                     stageId: 'system',
+                                                                     stageName: 'Hủy Tự Động',
+                                                                     enteredAt: Date.now(),
+                                                                     performedBy: 'System'
+                                                                  }
+                                                               ]
+                                                            };
+                                                         }
+                                                         return item;
+                                                      });
+
+                                                      if (orderChanged) {
+                                                         updates[`${DB_PATHS.ORDERS}/${orderKey}/items`] = newItems;
+                                                      }
+                                                   }
+                                                });
+                                             }
+
+                                             // Execute atomic update
+                                             await update(ref(db), updates);
+                                             alert(`Đã xóa quy trình "${wf.label}" và cập nhật dữ liệu liên quan thành công!`);
+
                                           } catch (error: any) {
                                              console.error('Lỗi khi xóa quy trình:', error);
                                              const errorMessage = error?.message || String(error);
@@ -340,7 +406,53 @@ const StageItem: React.FC<{
 }> = ({ stage, idx, stages, setStages }) => {
    const [showTodoInput, setShowTodoInput] = useState(false);
    const [newTodoText, setNewTodoText] = useState('');
+   const [newTodoNote, setNewTodoNote] = useState('');
+   const [editingTodo, setEditingTodo] = useState<{ id: string, title: string, description: string } | null>(null);
+
    const stageTodos = stage.todos || [];
+
+   const handleAddTodo = () => {
+      if (!newTodoText.trim()) return;
+      const newTodo: TodoStep = {
+         id: `todo-${Date.now()}`,
+         title: newTodoText,
+         description: newTodoNote.trim(),
+         completed: false,
+         order: stageTodos.length
+      };
+      const updatedStages = stages.map(s =>
+         s.id === stage.id
+            ? { ...s, todos: [...(s.todos || []), newTodo] }
+            : s
+      );
+      setStages(updatedStages);
+      setNewTodoText('');
+      setNewTodoNote('');
+      setShowTodoInput(false);
+   };
+
+   const startEditing = (todo: TodoStep) => {
+      setEditingTodo({
+         id: todo.id,
+         title: todo.title,
+         description: todo.description || ''
+      });
+   };
+
+   const saveEditing = () => {
+      if (!editingTodo || !editingTodo.title.trim()) return;
+      const updatedStages = stages.map(s =>
+         s.id === stage.id
+            ? {
+               ...s, todos: (s.todos || []).map(t =>
+                  t.id === editingTodo.id ? { ...t, title: editingTodo.title, description: editingTodo.description } : t
+               )
+            }
+            : s
+      );
+      setStages(updatedStages);
+      setEditingTodo(null);
+   };
 
    return (
       <div className="bg-neutral-900 border border-neutral-800 rounded overflow-hidden">
@@ -424,102 +536,129 @@ const StageItem: React.FC<{
             </div>
 
             {showTodoInput && (
-               <div className="flex gap-1 mb-1">
+               <div className="flex flex-col gap-2 mb-2 p-2 bg-neutral-800 rounded border border-neutral-700 animate-in fade-in zoom-in-95 duration-100">
                   <input
                      type="text"
                      value={newTodoText}
                      onChange={(e) => setNewTodoText(e.target.value)}
                      onKeyPress={(e) => {
                         if (e.key === 'Enter' && newTodoText.trim()) {
-                           const newTodo: TodoStep = {
-                              id: `todo-${Date.now()}`,
-                              title: newTodoText,
-                              completed: false,
-                              order: stageTodos.length
-                           };
-                           const updatedStages = stages.map(s =>
-                              s.id === stage.id
-                                 ? { ...s, todos: [...(s.todos || []), newTodo] }
-                                 : s
-                           );
-                           setStages(updatedStages);
-                           setNewTodoText('');
-                           setShowTodoInput(false);
+                           // Focus note
+                           const noteInput = document.getElementById(`new-note-${stage.id}`);
+                           if (noteInput) noteInput.focus();
                         }
                      }}
                      placeholder="Tên task..."
-                     className="flex-1 px-2 py-1 text-[11px] border border-neutral-700 rounded bg-neutral-800 text-slate-200 outline-none focus:border-gold-500"
+                     className="w-full px-2 py-1 text-[11px] border border-neutral-600 rounded bg-neutral-900 text-slate-200 outline-none focus:border-gold-500"
                      autoFocus
                   />
-                  <button
-                     onClick={() => {
-                        if (newTodoText.trim()) {
-                           const newTodo: TodoStep = {
-                              id: `todo-${Date.now()}`,
-                              title: newTodoText,
-                              completed: false,
-                              order: stageTodos.length
-                           };
-                           const updatedStages = stages.map(s =>
-                              s.id === stage.id
-                                 ? { ...s, todos: [...(s.todos || []), newTodo] }
-                                 : s
-                           );
-                           setStages(updatedStages);
-                           setNewTodoText('');
-                           setShowTodoInput(false);
-                        }
-                     }}
-                     className="px-2 py-1 bg-gold-600 hover:bg-gold-700 text-black rounded text-[11px] font-medium transition-colors"
-                  >
-                     OK
-                  </button>
+                  <div className="flex gap-2">
+                     <input
+                        id={`new-note-${stage.id}`}
+                        type="text"
+                        value={newTodoNote}
+                        onChange={(e) => setNewTodoNote(e.target.value)}
+                        onKeyPress={(e) => {
+                           if (e.key === 'Enter') handleAddTodo();
+                        }}
+                        placeholder="Ghi chú (tùy chọn)..."
+                        className="flex-1 px-2 py-1 text-[11px] border border-neutral-600 rounded bg-neutral-900 text-slate-200 outline-none focus:border-gold-500"
+                     />
+                     <button
+                        onClick={handleAddTodo}
+                        className="px-2 py-1 bg-gold-600 hover:bg-gold-700 text-black rounded text-[11px] font-medium transition-colors"
+                     >
+                        OK
+                     </button>
+                  </div>
                </div>
             )}
 
             {stageTodos.length === 0 ? (
                <p className="text-[10px] text-slate-600 italic py-1">Chưa có task</p>
             ) : (
-               <div className="space-y-0.5">
+               <div className="space-y-1">
                   {stageTodos.map(todo => (
-                     <div key={todo.id} className="flex items-center gap-1.5 text-[11px] p-1 bg-neutral-800/30 rounded">
-                        <button
-                           onClick={() => {
-                              const updatedStages = stages.map(s =>
-                                 s.id === stage.id
-                                    ? {
-                                       ...s, todos: (s.todos || []).map(t =>
-                                          t.id === todo.id ? { ...t, completed: !t.completed } : t
-                                       )
-                                    }
-                                    : s
-                              );
-                              setStages(updatedStages);
-                           }}
-                           className="flex-shrink-0"
-                        >
-                           {todo.completed ? (
-                              <CheckCircle2 size={12} className="text-emerald-500" />
+                     <div key={todo.id} className="bg-neutral-800/30 rounded border border-neutral-800 p-1.5">
+                        <div className="flex items-start gap-1.5 text-[11px]">
+                           <button
+                              onClick={() => {
+                                 const updatedStages = stages.map(s =>
+                                    s.id === stage.id
+                                       ? {
+                                          ...s, todos: (s.todos || []).map(t =>
+                                             t.id === todo.id ? { ...t, completed: !t.completed } : t
+                                          )
+                                       }
+                                       : s
+                                 );
+                                 setStages(updatedStages);
+                              }}
+                              className="flex-shrink-0 mt-0.5"
+                           >
+                              {todo.completed ? (
+                                 <CheckCircle2 size={12} className="text-emerald-500" />
+                              ) : (
+                                 <Circle size={12} className="text-slate-600" />
+                              )}
+                           </button>
+
+                           {/* Edit Form or Display */}
+                           {editingTodo && editingTodo.id === todo.id ? (
+                              <div className="flex-1 space-y-1">
+                                 <input
+                                    value={editingTodo.title}
+                                    onChange={(e) => setEditingTodo({ ...editingTodo, title: e.target.value })}
+                                    className="w-full px-1.5 py-0.5 text-[11px] border border-neutral-600 rounded bg-neutral-900 text-slate-200 focus:border-gold-500 outline-none"
+                                    autoFocus
+                                 />
+                                 <div className="flex gap-1">
+                                    <input
+                                       value={editingTodo.description}
+                                       onChange={(e) => setEditingTodo({ ...editingTodo, description: e.target.value })}
+                                       className="flex-1 px-1.5 py-0.5 text-[10px] border border-neutral-600 rounded bg-neutral-900 text-slate-300 focus:border-gold-500 outline-none"
+                                       placeholder="Ghi chú..."
+                                       onKeyDown={e => { if (e.key === 'Enter') saveEditing() }}
+                                    />
+                                    <button onClick={saveEditing} className="px-1.5 bg-gold-600 text-[10px] text-black rounded">Lưu</button>
+                                    <button onClick={() => setEditingTodo(null)} className="px-1.5 bg-neutral-700 text-[10px] text-slate-300 rounded">Hủy</button>
+                                 </div>
+                              </div>
                            ) : (
-                              <Circle size={12} className="text-slate-600" />
+                              <div className="flex-1 group" onClick={() => startEditing(todo)} title="Nhấn để sửa">
+                                 <div className="flex justify-between items-start">
+                                    <span className={`${todo.completed ? 'text-slate-500 line-through' : 'text-slate-300'} hover:text-gold-400 cursor-pointer`}>
+                                       {todo.title}
+                                    </span>
+                                    <div className="opacity-0 group-hover:opacity-100 flex gap-1">
+                                       <button
+                                          onClick={(e) => { e.stopPropagation(); startEditing(todo); }}
+                                          className="text-slate-600 hover:text-blue-400 transition-colors"
+                                       >
+                                          <Edit size={10} />
+                                       </button>
+                                       <button
+                                          onClick={(e) => {
+                                             e.stopPropagation();
+                                             const updatedStages = stages.map(s =>
+                                                s.id === stage.id
+                                                   ? { ...s, todos: (s.todos || []).filter(t => t.id !== todo.id).map((t, i) => ({ ...t, order: i })) }
+                                                   : s
+                                             );
+                                             setStages(updatedStages);
+                                          }}
+                                          className="text-slate-600 hover:text-red-500 transition-colors"
+                                       >
+                                          <X size={10} />
+                                       </button>
+                                    </div>
+                                 </div>
+                                 {todo.description && (
+                                    <div className="text-[10px] text-slate-500 mt-0.5">{todo.description}</div>
+                                 )}
+                              </div>
                            )}
-                        </button>
-                        <span className={`flex-1 ${todo.completed ? 'text-slate-500 line-through' : 'text-slate-300'}`}>
-                           {todo.title}
-                        </span>
-                        <button
-                           onClick={() => {
-                              const updatedStages = stages.map(s =>
-                                 s.id === stage.id
-                                    ? { ...s, todos: (s.todos || []).filter(t => t.id !== todo.id).map((t, i) => ({ ...t, order: i })) }
-                                    : s
-                              );
-                              setStages(updatedStages);
-                           }}
-                           className="text-slate-600 hover:text-red-500 transition-colors"
-                        >
-                           <X size={10} />
-                        </button>
+                        </div>
                      </div>
                   ))}
                </div>
@@ -1071,8 +1210,16 @@ const StageItemWithTodos: React.FC<{
    const [isExpanded, setIsExpanded] = useState(false);
    const [newTodoTitle, setNewTodoTitle] = useState('');
    const [newTodoNote, setNewTodoNote] = useState('');
-   const [editingTodoId, setEditingTodoId] = useState<string | null>(null);
+
+   // Edit State
+   const [editingTodo, setEditingTodo] = useState<{ id: string, title: string, description: string } | null>(null);
+
    const [todos, setTodos] = useState<TodoStep[]>(stage.todos || []);
+
+   // Sync todos from props
+   useEffect(() => {
+      setTodos(stage.todos || []);
+   }, [stage.todos]);
 
    const handleAddTodo = () => {
       if (!newTodoTitle.trim()) return;
@@ -1090,12 +1237,24 @@ const StageItemWithTodos: React.FC<{
       setNewTodoNote('');
    };
 
-   const handleUpdateTodoNote = (todoId: string, note: string) => {
+   const startEditing = (todo: TodoStep) => {
+      setEditingTodo({
+         id: todo.id,
+         title: todo.title,
+         description: todo.description || ''
+      });
+   };
+
+   const saveEditing = () => {
+      if (!editingTodo || !editingTodo.title.trim()) return;
       const updatedTodos = todos.map(t =>
-         t.id === todoId ? { ...t, description: note } : t
+         t.id === editingTodo.id
+            ? { ...t, title: editingTodo.title, description: editingTodo.description }
+            : t
       );
       setTodos(updatedTodos);
       onUpdate({ ...stage, todos: updatedTodos });
+      setEditingTodo(null);
    };
 
    const handleToggleTodo = (todoId: string) => {
@@ -1201,16 +1360,11 @@ const StageItemWithTodos: React.FC<{
          {/* Show todos preview always */}
          {todos.length > 0 && (
             <div className="border-t border-neutral-800 px-3 py-2 bg-neutral-900/50">
-               <div className="text-xs text-slate-400 mb-2 font-medium">Các công việc con:</div>
                <div className="space-y-1 max-h-24 overflow-y-auto">
                   {todos.slice(0, 3).map((todo) => (
                      <div key={todo.id} className="flex items-center gap-2 text-xs">
-                        {todo.completed ? (
-                           <CheckCircle2 size={14} className="text-emerald-500 flex-shrink-0" />
-                        ) : (
-                           <Circle size={14} className="text-slate-600 flex-shrink-0" />
-                        )}
-                        <span className={`${todo.completed ? 'text-slate-500 line-through' : 'text-slate-300'} truncate`}>
+                        <div className="w-1.5 h-1.5 rounded-full bg-slate-600 flex-shrink-0" />
+                        <span className="text-slate-300 truncate">
                            {todo.title}
                         </span>
                      </div>
@@ -1267,60 +1421,90 @@ const StageItemWithTodos: React.FC<{
                   ) : (
                      todos.map((todo) => (
                         <div key={todo.id} className="bg-neutral-800/50 rounded border border-neutral-700/50 hover:border-neutral-700 transition-colors">
-                           <div className="flex items-center gap-2 p-2">
-                              <button
-                                 onClick={() => handleToggleTodo(todo.id)}
-                                 className="flex-shrink-0 text-slate-500 hover:text-gold-500 transition-colors"
-                              >
-                                 {todo.completed ? (
-                                    <CheckCircle2 size={18} className="text-emerald-500" />
-                                 ) : (
-                                    <Circle size={18} />
-                                 )}
-                              </button>
-                              <div className="flex-1">
-                                 <span className={`text-sm block ${todo.completed ? 'text-slate-500 line-through' : 'text-slate-300'}`}>
-                                    {todo.title}
-                                 </span>
-                                 {editingTodoId === todo.id ? (
-                                    <input
-                                       type="text"
-                                       defaultValue={todo.description || ''}
-                                       onBlur={(e) => {
-                                          handleUpdateTodoNote(todo.id, e.target.value);
-                                          setEditingTodoId(null);
-                                       }}
-                                       onKeyPress={(e) => {
-                                          if (e.key === 'Enter') {
-                                             handleUpdateTodoNote(todo.id, e.currentTarget.value);
-                                             setEditingTodoId(null);
-                                          }
-                                       }}
-                                       placeholder="Thêm ghi chú..."
-                                       className="w-full mt-1 px-2 py-1 text-xs border border-neutral-600 rounded bg-neutral-900 text-slate-400 outline-none focus:border-gold-500"
-                                       autoFocus
-                                    />
-                                 ) : (
-                                    todo.description && (
-                                       <span className="text-xs text-slate-500 block mt-1">{todo.description}</span>
-                                    )
-                                 )}
+                           <div className="flex items-center gap-2 p-2 relative">
+                              {/* BulletPoint */}
+                              <div className="flex-shrink-0 self-start mt-2">
+                                 <div className="w-1.5 h-1.5 rounded-full bg-slate-500" />
                               </div>
-                              {!editingTodoId && (
-                                 <button
-                                    onClick={() => setEditingTodoId(todo.id)}
-                                    className="text-slate-600 hover:text-blue-400 p-0.5 transition-colors"
-                                    title="Thêm/sửa ghi chú"
-                                 >
-                                    <Edit size={12} />
-                                 </button>
+
+                              {/* Content or Edit Form */}
+                              {editingTodo && editingTodo.id === todo.id ? (
+                                 <div className="flex-1 space-y-2 animate-in fade-in zoom-in-95 duration-200">
+                                    {/* Edit Title */}
+                                    <div>
+                                       <input
+                                          value={editingTodo.title}
+                                          onChange={e => setEditingTodo({ ...editingTodo, title: e.target.value })}
+                                          className="w-full px-2 py-1.5 text-sm font-medium border border-neutral-600 rounded bg-neutral-900 text-slate-200 focus:border-gold-500 focus:ring-1 focus:ring-gold-500 outline-none placeholder-slate-500"
+                                          autoFocus
+                                          placeholder="Tên công việc..."
+                                          onKeyDown={e => {
+                                             if (e.key === 'Enter') {
+                                                // Focus next input or save
+                                                const descInput = document.getElementById(`edit-desc-${todo.id}`);
+                                                if (descInput) descInput.focus();
+                                             }
+                                          }}
+                                       />
+                                    </div>
+                                    {/* Edit Description & Buttons */}
+                                    <div className="flex gap-2">
+                                       <input
+                                          id={`edit-desc-${todo.id}`}
+                                          value={editingTodo.description}
+                                          onChange={e => setEditingTodo({ ...editingTodo, description: e.target.value })}
+                                          className="flex-1 px-2 py-1.5 text-xs border border-neutral-700 rounded bg-neutral-900 text-slate-300 focus:border-gold-500 outline-none placeholder-slate-600"
+                                          placeholder="Ghi chú (tùy chọn)..."
+                                          onKeyDown={e => {
+                                             if (e.key === 'Enter') saveEditing();
+                                          }}
+                                       />
+                                       <div className="flex gap-1">
+                                          <button
+                                             onClick={saveEditing}
+                                             className="px-3 py-1.5 bg-gold-600 text-black text-xs font-bold rounded hover:bg-gold-700 transition-colors flex items-center gap-1"
+                                             title="Lưu thay đổi"
+                                          >
+                                             Lưu
+                                          </button>
+                                          <button
+                                             onClick={() => setEditingTodo(null)}
+                                             className="px-3 py-1.5 bg-neutral-700 text-slate-300 text-xs font-medium rounded hover:bg-neutral-600 transition-colors"
+                                             title="Hủy bỏ"
+                                          >
+                                             Hủy
+                                          </button>
+                                       </div>
+                                    </div>
+                                 </div>
+                              ) : (
+                                 <div className="flex-1 group" onClick={() => startEditing(todo)} title="Nhấn để sửa">
+                                    <div className="flex justify-between items-start">
+                                       <span className={`text-sm font-medium transition-colors ${todo.completed ? 'text-slate-500 line-through' : 'text-slate-300 group-hover:text-gold-400 cursor-pointer'}`}>
+                                          {todo.title}
+                                       </span>
+                                       <div className="opacity-0 group-hover:opacity-100 transition-opacity flex gap-1">
+                                          <button
+                                             onClick={(e) => { e.stopPropagation(); startEditing(todo); }}
+                                             className="text-slate-600 hover:text-blue-400 p-1 transition-colors"
+                                             title="Sửa công việc"
+                                          >
+                                             <Edit size={14} />
+                                          </button>
+                                          <button
+                                             onClick={(e) => { e.stopPropagation(); handleRemoveTodo(todo.id); }}
+                                             className="text-slate-600 hover:text-red-500 p-1 transition-colors"
+                                             title="Xóa công việc"
+                                          >
+                                             <X size={14} />
+                                          </button>
+                                       </div>
+                                    </div>
+                                    {todo.description && (
+                                       <span className="text-xs text-slate-500 block mt-0.5 group-hover:text-slate-400">{todo.description}</span>
+                                    )}
+                                 </div>
                               )}
-                              <button
-                                 onClick={() => handleRemoveTodo(todo.id)}
-                                 className="text-slate-600 hover:text-red-500 p-0.5 transition-colors"
-                              >
-                                 <X size={14} />
-                              </button>
                            </div>
                         </div>
                      ))

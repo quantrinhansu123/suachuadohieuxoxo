@@ -1,24 +1,30 @@
 import React, { useState, useMemo, useRef, useEffect } from 'react';
-import { Plus, Search, Table, MoreHorizontal, QrCode, FileText, Image as ImageIcon, Printer, X, CheckSquare, Square, ShoppingBag, Package, Eye, Edit, Trash2 } from 'lucide-react';
+import { createPortal } from 'react-dom';
+import { Plus, Search, Table, MoreHorizontal, QrCode, FileText, Image as ImageIcon, Printer, X, CheckSquare, Square, ShoppingBag, Package, Eye, Edit, Trash2, Download, Upload, ArrowLeft, ChevronDown, Check } from 'lucide-react';
 import { Order, OrderStatus, ServiceType, ServiceItem, ServiceCatalogItem, WorkflowDefinition } from '../types';
 import { useAppStore } from '../context';
 import { TableFilter, FilterState, filterByDateRange } from './TableFilter';
 import { db, DB_PATHS } from '../firebase';
 import { ref, onValue, get } from 'firebase/database';
 
-// Action Menu Component
-const ActionMenu: React.FC<{
-  onView: () => void;
-  onEdit: () => void;
-  onDelete: () => void;
-  itemName: string;
-}> = ({ onView, onEdit, onDelete, itemName }) => {
+// Utility for formatting currency
+const formatCurrency = (amount: number) => {
+  return new Intl.NumberFormat('vi-VN', { style: 'currency', currency: 'VND' }).format(amount);
+};
+
+// MultiSelect Dropdown Filter
+const MultiSelectFilter: React.FC<{
+  label: string;
+  options: string[];
+  selected: string[];
+  onChange: (selected: string[]) => void;
+}> = ({ label, options, selected, onChange }) => {
   const [isOpen, setIsOpen] = useState(false);
-  const menuRef = useRef<HTMLDivElement>(null);
+  const containerRef = useRef<HTMLDivElement>(null);
 
   useEffect(() => {
-    const handleClickOutside = (event: MouseEvent) => {
-      if (menuRef.current && !menuRef.current.contains(event.target as Node)) {
+    const handleClickOutside = (e: MouseEvent) => {
+      if (containerRef.current && !containerRef.current.contains(e.target as Node)) {
         setIsOpen(false);
       }
     };
@@ -26,58 +32,134 @@ const ActionMenu: React.FC<{
     return () => document.removeEventListener('mousedown', handleClickOutside);
   }, []);
 
+  const toggleOption = (option: string) => {
+    if (selected.includes(option)) {
+      onChange(selected.filter(item => item !== option));
+    } else {
+      onChange([...selected, option]);
+    }
+  };
+
   return (
-    <div className="relative" ref={menuRef}>
+    <div className="relative" ref={containerRef}>
       <button
-        onClick={(e) => {
-          e.stopPropagation();
-          setIsOpen(!isOpen);
-        }}
+        onClick={() => setIsOpen(!isOpen)}
+        className={`flex items-center gap-2 px-3 py-2 border rounded-lg text-sm font-medium transition-colors ${selected.length > 0
+          ? 'bg-gold-900/20 border-gold-500/50 text-gold-500'
+          : 'bg-neutral-800 border-neutral-700 text-slate-300 hover:bg-neutral-700'
+          }`}
+      >
+        <span>{label}</span>
+        {selected.length > 0 && (
+          <span className="bg-gold-500 text-black text-[10px] px-1.5 rounded-full font-bold">{selected.length}</span>
+        )}
+        <ChevronDown size={14} className={`transition-transform ${isOpen ? 'rotate-180' : ''}`} />
+      </button>
+
+      {isOpen && (
+        <div className="absolute top-full left-0 mt-2 w-56 bg-neutral-900 border border-neutral-700 rounded-xl shadow-2xl z-50 overflow-hidden flex flex-col">
+          <div className="p-2 max-h-60 overflow-y-auto space-y-1">
+            <label className="flex items-center gap-2 p-2 hover:bg-neutral-800 rounded cursor-pointer">
+              <input
+                type="checkbox"
+                checked={selected.length === options.length}
+                onChange={() => onChange(selected.length === options.length ? [] : [...options])}
+                className="rounded border-neutral-600 bg-neutral-800 text-gold-500 focus:ring-gold-500"
+              />
+              <span className="text-sm font-medium text-slate-200">Chọn tất cả</span>
+            </label>
+            <div className="h-px bg-neutral-800 my-1"></div>
+            {options.map(option => (
+              <label key={option} className="flex items-center gap-2 p-2 hover:bg-neutral-800 rounded cursor-pointer">
+                <input
+                  type="checkbox"
+                  checked={selected.includes(option)}
+                  onChange={() => toggleOption(option)}
+                  className="rounded border-neutral-600 bg-neutral-800 text-gold-500 focus:ring-gold-500"
+                />
+                <span className="text-sm text-slate-300">{option}</span>
+              </label>
+            ))}
+          </div>
+        </div>
+      )}
+    </div>
+  );
+};
+
+// Action Menu Component around Portal
+const ActionMenu: React.FC<{
+  onView: () => void;
+  onEdit: () => void;
+  onDelete: () => void;
+  itemName: string;
+}> = ({ onView, onEdit, onDelete, itemName }) => {
+  const [isOpen, setIsOpen] = useState(false);
+  const buttonRef = useRef<HTMLButtonElement>(null);
+  const [coords, setCoords] = useState({ top: 0, left: 0 });
+
+  const toggleMenu = (e: React.MouseEvent) => {
+    e.stopPropagation();
+    if (!isOpen && buttonRef.current) {
+      const rect = buttonRef.current.getBoundingClientRect();
+      setCoords({
+        top: rect.bottom + 4,
+        left: rect.right - 150
+      });
+    }
+    setIsOpen(!isOpen);
+  };
+
+  useEffect(() => {
+    const handleScroll = () => { if (isOpen) setIsOpen(false); };
+    window.addEventListener('scroll', handleScroll, true);
+    window.addEventListener('resize', handleScroll);
+    return () => {
+      window.removeEventListener('scroll', handleScroll, true);
+      window.removeEventListener('resize', handleScroll);
+    };
+  }, [isOpen]);
+
+  return (
+    <>
+      <button
+        ref={buttonRef}
+        onClick={toggleMenu}
         className="p-2 hover:bg-neutral-800 rounded-lg text-slate-500 hover:text-slate-300 transition-colors"
       >
         <MoreHorizontal size={20} />
       </button>
 
-      {isOpen && (
-        <div className="absolute right-0 top-full mt-1 bg-neutral-800 border border-neutral-700 rounded-lg shadow-xl z-50 min-w-[140px] overflow-hidden">
-          <button
-            onClick={(e) => {
-              e.stopPropagation();
-              onView();
-              setIsOpen(false);
-            }}
-            className="w-full px-4 py-2.5 text-left text-sm text-slate-300 hover:bg-neutral-700 flex items-center gap-2 transition-colors"
+      {isOpen && createPortal(
+        <>
+          <div className="fixed inset-0 z-[9998]" onClick={(e) => { e.stopPropagation(); setIsOpen(false); }} />
+          <div
+            className="fixed bg-neutral-800 border border-neutral-700 rounded-lg shadow-xl z-[9999] w-[150px] overflow-hidden"
+            style={{ top: coords.top, left: coords.left }}
           >
-            <Eye size={16} />
-            Xem
-          </button>
-          <button
-            onClick={(e) => {
-              e.stopPropagation();
-              onEdit();
-              setIsOpen(false);
-            }}
-            className="w-full px-4 py-2.5 text-left text-sm text-slate-300 hover:bg-neutral-700 flex items-center gap-2 transition-colors"
-          >
-            <Edit size={16} />
-            Sửa
-          </button>
-          <button
-            onClick={(e) => {
-              e.stopPropagation();
-              if (window.confirm(`Bạn có chắc chắn muốn xóa đơn hàng "${itemName}"?`)) {
-                onDelete();
-              }
-              setIsOpen(false);
-            }}
-            className="w-full px-4 py-2.5 text-left text-sm text-red-400 hover:bg-red-900/20 flex items-center gap-2 transition-colors"
-          >
-            <Trash2 size={16} />
-            Xóa
-          </button>
-        </div>
+            <button
+              onClick={(e) => { e.stopPropagation(); onView(); setIsOpen(false); }}
+              className="w-full px-4 py-2.5 text-left text-sm text-slate-300 hover:bg-neutral-700 flex items-center gap-2 transition-colors"
+            >
+              <Eye size={16} /> Xem
+            </button>
+            <button
+              onClick={(e) => { e.stopPropagation(); onEdit(); setIsOpen(false); }}
+              className="w-full px-4 py-2.5 text-left text-sm text-slate-300 hover:bg-neutral-700 flex items-center gap-2 transition-colors"
+            >
+              <Edit size={16} /> Sửa
+            </button>
+            <button
+              onClick={(e) => { e.stopPropagation(); if (window.confirm(`Xóa đơn hàng "${itemName}"?`)) onDelete(); setIsOpen(false); }}
+              className="w-full px-4 py-2.5 text-left text-sm text-red-400 hover:bg-red-900/20 flex items-center gap-2 transition-colors"
+            >
+              <Trash2 size={16} /> Xóa
+            </button>
+          </div>
+        </>,
+        document.body
       )}
-    </div>
+    </>
   );
 };
 
@@ -92,8 +174,60 @@ export const Orders: React.FC = () => {
   const [selectedOrder, setSelectedOrder] = useState<Order | null>(null);
   const [selectedOrderIds, setSelectedOrderIds] = useState<Set<string>>(new Set());
   const [showQRModal, setShowQRModal] = useState(false);
-  const [filter, setFilter] = useState<FilterState>({ locNhanh: 'all', thoiGian: { tuNgay: null, denNgay: null } });
   const [searchText, setSearchText] = useState('');
+  const [filters, setFilters] = useState({
+    products: [] as string[],
+    statuses: [] as string[]
+  });
+
+  // Derived Options for Filters
+  const productOptions = useMemo(() => {
+    const set = new Set<string>();
+    orders.forEach(o => o.items?.forEach(i => set.add(i.name)));
+    return Array.from(set).sort();
+  }, [orders]);
+
+  const statusOptions = Object.values(OrderStatus);
+
+  const getCustomerInfo = (customerId: string) => customers.find(c => c.id === customerId);
+
+  // Filter Logic
+  const filteredOrders = useMemo(() => {
+    return orders.filter(order => {
+      // Search Text
+      if (searchText) {
+        const lower = searchText.toLowerCase();
+        const customer = customers.find(c => c.id === order.customerId);
+        const match = order.id.toLowerCase().includes(lower) ||
+          order.customerName.toLowerCase().includes(lower) ||
+          (customer?.phone || '').includes(lower);
+        if (!match) return false;
+      }
+
+      // Filter Product
+      if (filters.products.length > 0) {
+        const hasProduct = order.items?.some(i => filters.products.includes(i.name));
+        if (!hasProduct) return false;
+      }
+
+      // Filter Status
+      if (filters.statuses.length > 0) {
+        if (!filters.statuses.includes(order.status)) return false;
+      }
+
+      return true;
+    });
+  }, [orders, searchText, filters, customers]);
+
+  const updateFilter = (key: keyof typeof filters, val: string[]) => setFilters(prev => ({ ...prev, [key]: val }));
+
+  // Stats Calculation
+  const stats = useMemo(() => {
+    const count = filteredOrders.length;
+    const revenue = filteredOrders.reduce((sum, o) => sum + o.totalAmount, 0);
+    const deposit = filteredOrders.reduce((sum, o) => sum + (o.deposit || 0), 0);
+    return { count, revenue, deposit };
+  }, [filteredOrders]);
 
   // Fetch Services & Workflows from Firebase
   useEffect(() => {
@@ -125,20 +259,7 @@ export const Orders: React.FC = () => {
     };
   }, []);
 
-  // Lọc đơn hàng theo thời gian và tìm kiếm
-  const filteredOrders = useMemo(() => {
-    let result = filterByDateRange(orders || [], filter, 'createdAt') as Order[];
 
-    if (searchText.trim()) {
-      const search = searchText.toLowerCase();
-      result = result.filter(o =>
-        o.id.toLowerCase().includes(search) ||
-        o.customerName.toLowerCase().includes(search)
-      );
-    }
-
-    return result;
-  }, [orders, filter, searchText]);
 
   // New Order Form State
   const [newOrderItems, setNewOrderItems] = useState<ServiceItem[]>([]);
@@ -474,136 +595,143 @@ export const Orders: React.FC = () => {
     }
   };
 
-  const getStatusLabel = (status: OrderStatus) => {
-    switch (status) {
-      case OrderStatus.PENDING: return 'Chờ xử lý';
-      case OrderStatus.CONFIRMED: return 'Đã xác nhận';
-      case OrderStatus.PROCESSING: return 'Đang xử lý';
-      case OrderStatus.DONE: return 'Hoàn thành';
-      case OrderStatus.DELIVERED: return 'Đã trả khách';
-      case OrderStatus.CANCELLED: return 'Đã hủy';
-      default: return status;
-    }
-  };
 
-  // Helper to get customer info
-  const getCustomerInfo = (customerId: string) => {
-    return customers.find(c => c.id === customerId);
-  };
+
 
   return (
-    <div className="space-y-6">
-      <div className="flex flex-col sm:flex-row justify-between items-start sm:items-center gap-4">
-        <div>
-          <h1 className="text-2xl font-serif font-bold text-slate-100">Quản Lý Đơn Hàng</h1>
-          <p className="text-slate-500 mt-1">Quản lý tiếp nhận, xử lý và trả hàng.</p>
-        </div>
-        <button
-          onClick={() => { setIsModalOpen(true); setNewOrderItems([]); }}
-          className="flex items-center gap-2 bg-gold-600 hover:bg-gold-700 text-black font-medium px-4 py-2.5 rounded-lg shadow-lg shadow-gold-900/20 transition-all"
-        >
-          <Plus size={18} />
-          <span>Tạo Đơn Mới</span>
-        </button>
-      </div>
+    <div className="space-y-4 h-full flex flex-col">
+      {/* --- CONTROL PANEL --- */}
+      <div className="bg-neutral-900 rounded-xl shadow-sm border border-neutral-800 p-4 space-y-4 flex-shrink-0">
 
-      {/* Filters & Actions */}
-      <div className="bg-neutral-900 p-4 rounded-xl shadow-lg shadow-black/20 border border-neutral-800 flex flex-col sm:flex-row gap-4 items-center">
-        {selectedOrderIds.size > 0 ? (
-          <div className="flex-1 flex items-center gap-4 bg-neutral-800 p-2 rounded-lg border border-neutral-700 animate-in fade-in slide-in-from-left-2">
-            <span className="font-medium text-slate-300 ml-2">{selectedOrderIds.size} đơn hàng đã chọn</span>
-            <div className="h-4 w-px bg-neutral-700"></div>
-            <button
-              onClick={() => setShowQRModal(true)}
-              className="flex items-center gap-2 px-3 py-1.5 bg-neutral-900 border border-neutral-700 rounded text-sm hover:border-gold-500 hover:text-gold-500 transition-colors text-slate-300"
-            >
-              <QrCode size={16} /> In QR Code
-            </button>
-          </div>
-        ) : (
-          <div className="relative flex-1">
-            <Search className="absolute left-3 top-1/2 -translate-y-1/2 text-slate-500" size={20} />
+        {/* ROW 1: Actions & Search */}
+        <div className="flex flex-col sm:flex-row gap-4 items-center">
+          <button onClick={() => window.history.back()} className="p-2 hover:bg-neutral-800 rounded-lg text-slate-400 hover:text-slate-200 transition-colors" title="Quay lại">
+            <ArrowLeft size={20} />
+          </button>
+
+          <div className="relative flex-1 w-full">
+            <Search className="absolute left-3 top-1/2 -translate-y-1/2 text-slate-500" size={18} />
             <input
               type="text"
-              placeholder="Tìm kiếm theo Mã đơn, Tên khách..."
+              placeholder="Tìm kiếm (Mã đơn, Tên khách, SĐT...)"
               value={searchText}
               onChange={(e) => setSearchText(e.target.value)}
-              className="w-full pl-10 pr-4 py-2 bg-neutral-800 border border-neutral-700 text-slate-200 rounded-lg focus:ring-1 focus:ring-gold-500 outline-none placeholder-slate-600"
+              className="w-full pl-10 pr-4 py-2.5 bg-neutral-800 border border-neutral-700 rounded-lg text-slate-200 focus:ring-1 focus:ring-gold-500 outline-none transition-all placeholder-slate-600"
             />
           </div>
-        )}
 
-        <div className="flex gap-2 flex-wrap">
-          <TableFilter onFilterChange={setFilter} />
+          <div className="flex gap-2 w-full sm:w-auto">
+            <button className="flex-1 sm:flex-none flex items-center justify-center gap-2 px-4 py-2.5 bg-neutral-800 border border-neutral-700 rounded-lg text-slate-300 hover:bg-neutral-700 transition-colors" onClick={() => alert('Đang phát triển')}>
+              <Download size={18} /> <span className="hidden sm:inline">Excel</span>
+            </button>
+            <button className="flex-1 sm:flex-none flex items-center justify-center gap-2 px-4 py-2.5 bg-neutral-800 border border-neutral-700 rounded-lg text-slate-300 hover:bg-neutral-700 transition-colors" onClick={() => alert('Đang phát triển')}>
+              <Upload size={18} /> <span className="hidden sm:inline">Upload</span>
+            </button>
+            <button
+              onClick={() => { setIsModalOpen(true); setNewOrderItems([]); }}
+              className="flex items-center gap-2 bg-gold-600 hover:bg-gold-700 text-black font-medium px-4 py-2.5 rounded-lg shadow-lg shadow-gold-900/20 transition-all font-bold"
+            >
+              <Plus size={18} /> <span className="hidden sm:inline">Tạo Đơn</span>
+            </button>
+          </div>
+        </div>
+
+        {/* ROW 2: Filters */}
+        <div className="flex flex-wrap gap-2 pt-2 border-t border-neutral-800">
+          <MultiSelectFilter label="Sản phẩm / Dịch vụ" options={productOptions} selected={filters.products} onChange={(v) => updateFilter('products', v)} />
+          <MultiSelectFilter label="Trạng thái" options={statusOptions} selected={filters.statuses} onChange={(v) => updateFilter('statuses', v)} />
+          {selectedOrderIds.size > 0 && (
+            <div className="ml-auto flex items-center gap-2 bg-gold-900/20 border border-gold-900/50 px-3 py-1 rounded text-gold-500 text-sm animate-in fade-in">
+              <span>Đã chọn {selectedOrderIds.size} đơn</span>
+              <div className="h-4 w-px bg-gold-900/50 mx-2"></div>
+              <button onClick={() => setShowQRModal(true)} className="hover:text-gold-400 flex items-center gap-1"><QrCode size={14} /> Print QR</button>
+            </div>
+          )}
+        </div>
+
+        {/* ROW 3: Stats */}
+        <div className="flex flex-wrap gap-6 sm:gap-12 pt-2 border-t border-neutral-800 text-sm">
+          <div className="flex items-center gap-2">
+            <span className="text-slate-500">Số đơn hàng:</span>
+            <span className="text-xl font-bold text-slate-200">{stats.count}</span>
+          </div>
+          <div className="flex items-center gap-2">
+            <span className="text-slate-500">Tổng doanh thu:</span>
+            <span className="text-xl font-bold text-gold-500">{formatCurrency(stats.revenue)}</span>
+          </div>
+          <div className="flex items-center gap-2">
+            <span className="text-slate-500">Đã cọc:</span>
+            <span className="text-xl font-bold text-emerald-500">{formatCurrency(stats.deposit)}</span>
+          </div>
         </div>
       </div>
 
-      {/* Orders Table */}
-      <div className="bg-neutral-900 rounded-xl shadow-lg shadow-black/20 border border-neutral-800 overflow-hidden">
-        <div className="overflow-x-auto">
-          <table className="w-full text-left border-collapse">
-            <thead>
-              <tr className="bg-neutral-800/50 border-b border-neutral-800">
+      {/* --- TABLE CONTENT --- */}
+      <div className="bg-neutral-900 rounded-xl shadow-lg shadow-black/20 border border-neutral-800 flex flex-col overflow-hidden min-h-0 flex-1">
+        <div className="overflow-auto flex-1">
+          <table className="w-full text-left border-collapse relative">
+            <thead className="sticky top-0 z-20 bg-neutral-900 shadow-sm">
+              <tr className="border-b border-neutral-800 text-slate-500 text-xs font-bold uppercase tracking-wider bg-neutral-800/50">
                 <th className="p-4 w-10">
                   <button onClick={toggleSelectAll} className="text-slate-500 hover:text-slate-300">
-                    {selectedOrderIds.size > 0 && selectedOrderIds.size === orders.length ? <CheckSquare size={20} className="text-gold-500" /> : <Square size={20} />}
+                    {selectedOrderIds.size > 0 && selectedOrderIds.size === orders.length ? <CheckSquare size={18} className="text-gold-500" /> : <Square size={18} />}
                   </button>
                 </th>
-                <th className="p-4 font-semibold text-slate-400 text-sm">Mã Đơn</th>
-                <th className="p-4 font-semibold text-slate-400 text-sm">Khách Hàng</th>
-                <th className="p-4 font-semibold text-slate-400 text-sm">Sản Phẩm / Dịch Vụ</th>
-                <th className="p-4 font-semibold text-slate-400 text-sm">Tổng Tiền</th>
-                <th className="p-4 font-semibold text-slate-400 text-sm">Trạng Thái</th>
-                <th className="p-4 font-semibold text-slate-400 text-sm">Ngày Hẹn Trả</th>
-                <th className="p-4 font-semibold text-slate-400 text-sm">Thao Tác</th>
+                <th className="p-4 min-w-[120px]">Mã Đơn</th>
+                <th className="p-4 min-w-[200px]">Khách Hàng</th>
+                <th className="p-4">Sản Phẩm</th>
+                <th className="p-4 text-right">Tổng Tiền</th>
+                <th className="p-4">Trạng Thái</th>
+                <th className="p-4 hidden md:table-cell">Ngày Hẹn</th>
+                <th className="p-4 w-12 sticky right-0 bg-neutral-900 z-30"></th>
               </tr>
             </thead>
             <tbody className="divide-y divide-neutral-800">
               {filteredOrders.length === 0 ? (
-                <tr>
-                  <td colSpan={8} className="p-8 text-center text-slate-500">
-                    Không tìm thấy đơn hàng nào phù hợp với bộ lọc
-                  </td>
-                </tr>
+                <tr><td colSpan={8} className="p-12 text-center text-slate-500">Không tìm thấy đơn hàng</td></tr>
               ) : filteredOrders.map((order) => {
                 const isSelected = selectedOrderIds.has(order.id);
                 return (
-                  <tr key={order.id} className={`transition-colors cursor-pointer ${isSelected ? 'bg-gold-900/10' : 'hover:bg-neutral-800'}`} onClick={() => setSelectedOrder(order)}>
+                  <tr key={order.id} className={`transition-colors cursor-pointer group ${isSelected ? 'bg-gold-900/10' : 'hover:bg-neutral-800/50'}`} onClick={() => setSelectedOrder(order)}>
                     <td className="p-4" onClick={(e) => toggleSelectOrder(order.id, e)}>
-                      {isSelected ? <CheckSquare size={20} className="text-gold-500" /> : <Square size={20} className="text-neutral-600" />}
+                      {isSelected ? <CheckSquare size={18} className="text-gold-500" /> : <Square size={18} className="text-neutral-600" />}
                     </td>
-                    <td className="p-4 font-medium text-slate-200">{order.id}</td>
+                    <td className="p-4 font-mono text-slate-300 font-bold">{order.id}</td>
                     <td className="p-4">
-                      <div className="font-medium text-slate-200">{order.customerName}</div>
-                      <div className="text-xs text-gold-600/80">
-                        {/* Try to show Tier if possible */}
-                        {getCustomerInfo(order.customerId)?.tier === 'VVIP' ? 'VVIP Member' : getCustomerInfo(order.customerId)?.tier === 'VIP' ? 'VIP Member' : 'Member'}
+                      <div className="font-bold text-slate-200">{order.customerName}</div>
+                      <div className="text-[10px] text-gold-600/80 font-bold mt-0.5 uppercase tracking-wide">
+                        {getCustomerInfo(order.customerId)?.tier || 'Member'}
                       </div>
                     </td>
                     <td className="p-4">
                       <div className="flex -space-x-2">
-                        {(order.items || []).map((item, idx) => (
+                        {(order.items || []).slice(0, 4).map((item, idx) => (
                           <div key={idx} className="w-8 h-8 rounded-full border-2 border-neutral-900 bg-neutral-800 flex items-center justify-center overflow-hidden" title={item.name}>
                             {item.beforeImage ? (
-                              <img src={item.beforeImage} alt="" className="w-full h-full object-cover" />
+                              <img src={item.beforeImage} className="w-full h-full object-cover" />
                             ) : (
-                              <span className="text-xs text-slate-400">{item.name[0]}</span>
+                              <span className="text-[10px] text-slate-400 font-bold">{item.name[0]}</span>
                             )}
                           </div>
                         ))}
-                        <div className="w-8 h-8 rounded-full border-2 border-neutral-900 bg-neutral-800 flex items-center justify-center text-xs text-slate-400 font-medium">
-                          {(order.items || []).length}
-                        </div>
+                        {(order.items || []).length > 4 && (
+                          <div className="w-8 h-8 rounded-full border-2 border-neutral-900 bg-neutral-800 flex items-center justify-center text-[10px] text-slate-400 font-bold">
+                            +{(order.items || []).length - 4}
+                          </div>
+                        )}
                       </div>
                     </td>
-                    <td className="p-4 font-medium text-gold-400">{order.totalAmount.toLocaleString()} ₫</td>
+                    <td className="p-4 text-right font-bold text-gold-400">{order.totalAmount.toLocaleString()} ₫</td>
                     <td className="p-4">
-                      <span className={`px-2.5 py-1 rounded-full text-xs font-medium border ${getStatusColor(order.status)}`}>
-                        {getStatusLabel(order.status)}
+                      <span className={`inline-flex items-center px-2 py-0.5 rounded text-[10px] font-bold uppercase border ${order.status === OrderStatus.DONE ? 'bg-green-500/10 text-green-500 border-green-500/20' :
+                        order.status === OrderStatus.PENDING ? 'bg-yellow-500/10 text-yellow-500 border-yellow-500/20' :
+                          'bg-slate-500/10 text-slate-400 border-slate-500/20'
+                        }`}>
+                        {order.status}
                       </span>
                     </td>
-                    <td className="p-4 text-slate-500 text-sm">{order.expectedDelivery}</td>
-                    <td className="p-4">
+                    <td className="p-4 text-sm text-slate-400 hidden md:table-cell">{order.expectedDelivery}</td>
+                    <td className="p-4 sticky right-0 bg-neutral-900/95 backdrop-blur-sm group-hover:bg-neutral-800 transition-colors z-20">
                       <ActionMenu
                         itemName={order.id}
                         onView={() => setSelectedOrder(order)}
@@ -611,19 +739,12 @@ export const Orders: React.FC = () => {
                           setEditingOrder(order);
                           setEditOrderItems([...order.items]);
                           setEditSelectedCustomerId(order.customerId);
-                          setEditDeposit(order.deposit.toString());
-                          setEditExpectedDelivery(order.expectedDelivery);
+                          setEditDeposit(order.deposit?.toString() || '0');
+                          setEditExpectedDelivery(order.expectedDelivery || '');
                           setEditNotes(order.notes || '');
                           setIsEditModalOpen(true);
                         }}
-                        onDelete={async () => {
-                          try {
-                            await deleteOrder(order.id);
-                          } catch (error: any) {
-                            console.error('Lỗi khi xóa đơn hàng:', error);
-                            alert('Lỗi khi xóa đơn hàng: ' + (error?.message || String(error)));
-                          }
-                        }}
+                        onDelete={() => deleteOrder(order.id)}
                       />
                     </td>
                   </tr>

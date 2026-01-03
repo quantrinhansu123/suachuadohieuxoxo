@@ -26,6 +26,12 @@ export interface Customer {
   totalSpent: number;
   lastVisit: string;
   notes?: string;
+  // New fields for extended filtering
+  source?: string; // Nguồn tới (Facebook, Google,...)
+  status?: string; // Trạng thái (Mới, Thân thiết,...)
+  assigneeId?: string; // NV Sale phụ trách
+  interactionCount?: number; // Số lần tương tác/gọi
+  group?: string; // Nhóm khách hàng (có thể map với Tier hoặc riêng)
 }
 
 // Interface for tracking time and user per stage
