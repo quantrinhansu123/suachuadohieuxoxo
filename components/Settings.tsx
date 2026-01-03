@@ -11,15 +11,61 @@ import {
   MOCK_ORDERS, MOCK_INVENTORY, MOCK_CUSTOMERS, 
   SERVICE_CATALOG, MOCK_PRODUCTS, MOCK_MEMBERS, MOCK_WORKFLOWS 
 } from '../constants';
-import { ServiceType } from '../types';
+import { ServiceType, SalaryConfig } from '../types';
 
 export const Settings: React.FC = () => {
   const [activeTab, setActiveTab] = useState<'GENERAL' | 'ROLES' | 'SALARY' | 'DATABASE'>('GENERAL');
   const [isSeeding, setIsSeeding] = useState(false);
+  const [isSaving, setIsSaving] = useState(false);
   
   // Local state to simulate form handling
   const [companyInfo, setCompanyInfo] = useState(DEFAULT_COMPANY_CONFIG);
   const [themeColor, setThemeColor] = useState(DEFAULT_COMPANY_CONFIG.themeColor);
+  const [roles, setRoles] = useState(MOCK_ROLES);
+  const [salaries, setSalaries] = useState(MOCK_SALARIES);
+  const [editingSalary, setEditingSalary] = useState<SalaryConfig | null>(null);
+
+  const handleSaveSettings = async () => {
+    setIsSaving(true);
+    try {
+      // Update company config
+      const updatedCompany = { ...companyInfo, themeColor };
+      
+      // Save to Firebase (or local storage for now)
+      // await set(ref(db, DB_PATHS.SETTINGS), { company: updatedCompany, roles, salaries });
+      
+      // Simulate save
+      await new Promise(resolve => setTimeout(resolve, 1000));
+      
+      alert('Đã lưu cài đặt thành công!');
+    } catch (error) {
+      console.error(error);
+      alert('Lỗi khi lưu cài đặt: ' + error);
+    } finally {
+      setIsSaving(false);
+    }
+  };
+
+  const handleUpdateRolePermission = (roleId: string, permission: string, value: boolean) => {
+    setRoles(roles.map(role => 
+      role.id === roleId 
+        ? { ...role, permissions: { ...role.permissions, [permission]: value } }
+        : role
+    ));
+  };
+
+  const handleEditSalary = (salary: SalaryConfig) => {
+    setEditingSalary({ ...salary });
+  };
+
+  const handleSaveSalary = () => {
+    if (!editingSalary) return;
+    setSalaries(salaries.map(s => 
+      s.roleId === editingSalary.roleId ? editingSalary : s
+    ));
+    setEditingSalary(null);
+    alert('Đã cập nhật cấu hình lương!');
+  };
 
   const handleSeedDatabase = async () => {
     if (!window.confirm("Hành động này sẽ ghi đè toàn bộ dữ liệu mẫu lên Database của bạn. Bạn có chắc chắn không?")) return;
@@ -76,9 +122,13 @@ export const Settings: React.FC = () => {
           <h1 className="text-2xl font-serif font-bold text-slate-100">Cài Đặt Hệ Thống</h1>
           <p className="text-slate-500 mt-1">Quản lý thông tin công ty, phân quyền và cấu hình tài chính.</p>
         </div>
-        <button className="flex items-center gap-2 bg-gold-600 hover:bg-gold-700 text-black font-medium px-6 py-2.5 rounded-lg shadow-lg shadow-gold-900/20 transition-all">
-          <Save size={18} />
-          <span>Lưu Thay Đổi</span>
+        <button 
+          onClick={handleSaveSettings}
+          disabled={isSaving}
+          className="flex items-center gap-2 bg-gold-600 hover:bg-gold-700 text-black font-medium px-6 py-2.5 rounded-lg shadow-lg shadow-gold-900/20 transition-all disabled:opacity-50"
+        >
+          {isSaving ? <RefreshCw size={18} className="animate-spin" /> : <Save size={18} />}
+          <span>{isSaving ? 'Đang lưu...' : 'Lưu Thay Đổi'}</span>
         </button>
       </div>
 
@@ -175,19 +225,39 @@ export const Settings: React.FC = () => {
                 <div className="grid grid-cols-1 md:grid-cols-2 gap-6">
                   <div>
                      <label className="block text-sm font-medium text-slate-400 mb-1 flex items-center gap-2"><MapPin size={14}/> Địa chỉ trụ sở</label>
-                     <input type="text" value={companyInfo.address} className="w-full p-2.5 border border-neutral-700 rounded-lg focus:ring-1 focus:ring-gold-500 outline-none bg-neutral-950 text-slate-200" />
+                     <input 
+                       type="text" 
+                       value={companyInfo.address} 
+                       onChange={(e) => setCompanyInfo({...companyInfo, address: e.target.value})}
+                       className="w-full p-2.5 border border-neutral-700 rounded-lg focus:ring-1 focus:ring-gold-500 outline-none bg-neutral-950 text-slate-200" 
+                     />
                   </div>
                   <div>
                      <label className="block text-sm font-medium text-slate-400 mb-1 flex items-center gap-2"><Smartphone size={14}/> Hotline</label>
-                     <input type="text" value={companyInfo.phone} className="w-full p-2.5 border border-neutral-700 rounded-lg focus:ring-1 focus:ring-gold-500 outline-none bg-neutral-950 text-slate-200" />
+                     <input 
+                       type="text" 
+                       value={companyInfo.phone} 
+                       onChange={(e) => setCompanyInfo({...companyInfo, phone: e.target.value})}
+                       className="w-full p-2.5 border border-neutral-700 rounded-lg focus:ring-1 focus:ring-gold-500 outline-none bg-neutral-950 text-slate-200" 
+                     />
                   </div>
                   <div>
                      <label className="block text-sm font-medium text-slate-400 mb-1 flex items-center gap-2"><Mail size={14}/> Email</label>
-                     <input type="text" value={companyInfo.email} className="w-full p-2.5 border border-neutral-700 rounded-lg focus:ring-1 focus:ring-gold-500 outline-none bg-neutral-950 text-slate-200" />
+                     <input 
+                       type="email" 
+                       value={companyInfo.email} 
+                       onChange={(e) => setCompanyInfo({...companyInfo, email: e.target.value})}
+                       className="w-full p-2.5 border border-neutral-700 rounded-lg focus:ring-1 focus:ring-gold-500 outline-none bg-neutral-950 text-slate-200" 
+                     />
                   </div>
                   <div>
                      <label className="block text-sm font-medium text-slate-400 mb-1 flex items-center gap-2"><Globe size={14}/> Website</label>
-                     <input type="text" value={companyInfo.website} className="w-full p-2.5 border border-neutral-700 rounded-lg focus:ring-1 focus:ring-gold-500 outline-none bg-neutral-950 text-slate-200" />
+                     <input 
+                       type="text" 
+                       value={companyInfo.website} 
+                       onChange={(e) => setCompanyInfo({...companyInfo, website: e.target.value})}
+                       className="w-full p-2.5 border border-neutral-700 rounded-lg focus:ring-1 focus:ring-gold-500 outline-none bg-neutral-950 text-slate-200" 
+                     />
                   </div>
                 </div>
               </div>
@@ -215,23 +285,48 @@ export const Settings: React.FC = () => {
                       </tr>
                     </thead>
                     <tbody className="divide-y divide-neutral-800">
-                      {MOCK_ROLES.map((role) => (
+                      {roles.map((role) => (
                         <tr key={role.id} className="hover:bg-neutral-800 transition-colors">
                           <td className="p-4 font-bold text-slate-200">{role.name}</td>
                           <td className="p-4 text-center">
-                            <input type="checkbox" checked={role.permissions.dashboard} className="w-5 h-5 text-gold-600 rounded focus:ring-gold-500 border-neutral-600 bg-neutral-900 accent-gold-600" readOnly />
+                            <input 
+                              type="checkbox" 
+                              checked={role.permissions.dashboard} 
+                              onChange={(e) => handleUpdateRolePermission(role.id, 'dashboard', e.target.checked)}
+                              className="w-5 h-5 text-gold-600 rounded focus:ring-gold-500 border-neutral-600 bg-neutral-900 accent-gold-600 cursor-pointer" 
+                            />
                           </td>
                           <td className="p-4 text-center">
-                            <input type="checkbox" checked={role.permissions.customers} className="w-5 h-5 text-gold-600 rounded focus:ring-gold-500 border-neutral-600 bg-neutral-900 accent-gold-600" readOnly />
+                            <input 
+                              type="checkbox" 
+                              checked={role.permissions.customers} 
+                              onChange={(e) => handleUpdateRolePermission(role.id, 'customers', e.target.checked)}
+                              className="w-5 h-5 text-gold-600 rounded focus:ring-gold-500 border-neutral-600 bg-neutral-900 accent-gold-600 cursor-pointer" 
+                            />
                           </td>
                           <td className="p-4 text-center">
-                            <input type="checkbox" checked={role.permissions.orders} className="w-5 h-5 text-gold-600 rounded focus:ring-gold-500 border-neutral-600 bg-neutral-900 accent-gold-600" readOnly />
+                            <input 
+                              type="checkbox" 
+                              checked={role.permissions.orders} 
+                              onChange={(e) => handleUpdateRolePermission(role.id, 'orders', e.target.checked)}
+                              className="w-5 h-5 text-gold-600 rounded focus:ring-gold-500 border-neutral-600 bg-neutral-900 accent-gold-600 cursor-pointer" 
+                            />
                           </td>
                           <td className="p-4 text-center">
-                            <input type="checkbox" checked={role.permissions.inventory} className="w-5 h-5 text-gold-600 rounded focus:ring-gold-500 border-neutral-600 bg-neutral-900 accent-gold-600" readOnly />
+                            <input 
+                              type="checkbox" 
+                              checked={role.permissions.inventory} 
+                              onChange={(e) => handleUpdateRolePermission(role.id, 'inventory', e.target.checked)}
+                              className="w-5 h-5 text-gold-600 rounded focus:ring-gold-500 border-neutral-600 bg-neutral-900 accent-gold-600 cursor-pointer" 
+                            />
                           </td>
                           <td className="p-4 text-center">
-                            <input type="checkbox" checked={role.permissions.settings} className="w-5 h-5 text-gold-600 rounded focus:ring-gold-500 border-neutral-600 bg-neutral-900 accent-gold-600" readOnly />
+                            <input 
+                              type="checkbox" 
+                              checked={role.permissions.settings} 
+                              onChange={(e) => handleUpdateRolePermission(role.id, 'settings', e.target.checked)}
+                              className="w-5 h-5 text-gold-600 rounded focus:ring-gold-500 border-neutral-600 bg-neutral-900 accent-gold-600 cursor-pointer" 
+                            />
                           </td>
                         </tr>
                       ))}
@@ -248,14 +343,19 @@ export const Settings: React.FC = () => {
                <p className="text-slate-500 text-sm mb-6">Thiết lập lương cơ bản và tỷ lệ hoa hồng (Commission) cho từng vị trí dựa trên loại dịch vụ.</p>
 
                <div className="space-y-8">
-                 {MOCK_SALARIES.map((salary) => {
-                   const roleName = MOCK_ROLES.find(r => r.id === salary.roleId)?.name || salary.roleId;
+                 {salaries.map((salary) => {
+                   const roleName = roles.find(r => r.id === salary.roleId)?.name || salary.roleId;
                    
                    return (
                      <div key={salary.roleId} className="border border-neutral-800 rounded-xl p-6 bg-neutral-800/30">
                         <div className="flex justify-between items-center mb-4">
                            <h4 className="font-bold text-slate-200 text-lg">{roleName}</h4>
-                           <button className="text-gold-500 text-sm font-medium hover:underline">Chỉnh sửa</button>
+                           <button 
+                             onClick={() => handleEditSalary(salary)}
+                             className="text-gold-500 text-sm font-medium hover:underline"
+                           >
+                             Chỉnh sửa
+                           </button>
                         </div>
                         
                         <div className="grid grid-cols-1 md:grid-cols-2 gap-6 mb-6">
@@ -286,6 +386,98 @@ export const Settings: React.FC = () => {
                    );
                  })}
                </div>
+
+               {/* Modal Chỉnh Sửa Lương */}
+               {editingSalary && (
+                 <div className="fixed inset-0 bg-black/60 backdrop-blur-sm flex items-center justify-center z-50 p-4">
+                   <div className="bg-neutral-900 rounded-xl shadow-2xl border border-neutral-800 w-full max-w-2xl max-h-[90vh] overflow-y-auto">
+                     <div className="sticky top-0 bg-neutral-900 border-b border-neutral-800 p-6 flex justify-between items-center">
+                       <h2 className="text-xl font-serif font-bold text-slate-100">
+                         Chỉnh Sửa Lương - {roles.find(r => r.id === editingSalary.roleId)?.name || editingSalary.roleId}
+                       </h2>
+                       <button 
+                         onClick={() => setEditingSalary(null)}
+                         className="text-slate-500 hover:text-slate-300 transition-colors"
+                       >
+                         ✕
+                       </button>
+                     </div>
+                     
+                     <div className="p-6 space-y-6">
+                       <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
+                         <div>
+                           <label className="block text-sm font-medium text-slate-400 mb-2">
+                             Lương Cơ Bản (₫) <span className="text-red-500">*</span>
+                           </label>
+                           <input
+                             type="number"
+                             value={editingSalary.baseSalary}
+                             onChange={(e) => setEditingSalary({...editingSalary, baseSalary: parseInt(e.target.value) || 0})}
+                             className="w-full px-4 py-2 bg-neutral-800 border border-neutral-700 rounded-lg text-slate-200 focus:ring-2 focus:ring-gold-500 outline-none transition-all"
+                           />
+                         </div>
+                         <div>
+                           <label className="block text-sm font-medium text-slate-400 mb-2">
+                             Phụ Cấp (₫) <span className="text-red-500">*</span>
+                           </label>
+                           <input
+                             type="number"
+                             value={editingSalary.allowance}
+                             onChange={(e) => setEditingSalary({...editingSalary, allowance: parseInt(e.target.value) || 0})}
+                             className="w-full px-4 py-2 bg-neutral-800 border border-neutral-700 rounded-lg text-slate-200 focus:ring-2 focus:ring-gold-500 outline-none transition-all"
+                           />
+                         </div>
+                       </div>
+
+                       <div>
+                         <label className="block text-sm font-medium text-slate-400 mb-4">
+                           Tỷ Lệ Hoa Hồng Theo Dịch Vụ (%)
+                         </label>
+                         <div className="space-y-3">
+                           {Object.entries(editingSalary.commissionRate).map(([type, rate]) => (
+                             <div key={type} className="flex items-center justify-between p-3 bg-neutral-800 rounded-lg border border-neutral-700">
+                               <span className="text-sm font-medium text-slate-300">Dịch vụ {type}</span>
+                               <div className="flex items-center gap-2">
+                                 <input
+                                   type="number"
+                                   min="0"
+                                   max="100"
+                                   step="0.1"
+                                   value={rate}
+                                   onChange={(e) => setEditingSalary({
+                                     ...editingSalary,
+                                     commissionRate: {
+                                       ...editingSalary.commissionRate,
+                                       [type]: parseFloat(e.target.value) || 0
+                                     }
+                                   })}
+                                   className="w-24 px-3 py-1.5 bg-neutral-900 border border-neutral-700 rounded text-slate-200 focus:ring-2 focus:ring-gold-500 outline-none text-sm"
+                                 />
+                                 <span className="text-sm text-slate-400">%</span>
+                               </div>
+                             </div>
+                           ))}
+                         </div>
+                       </div>
+                     </div>
+                     
+                     <div className="sticky bottom-0 bg-neutral-900 border-t border-neutral-800 p-6 flex gap-3 justify-end">
+                       <button
+                         onClick={() => setEditingSalary(null)}
+                         className="px-6 py-2.5 border border-neutral-700 bg-neutral-800 text-slate-300 rounded-lg hover:bg-neutral-700 transition-colors"
+                       >
+                         Hủy
+                       </button>
+                       <button
+                         onClick={handleSaveSalary}
+                         className="px-6 py-2.5 bg-gold-600 hover:bg-gold-700 text-black font-medium rounded-lg shadow-lg shadow-gold-900/20 transition-all"
+                       >
+                         Lưu Thay Đổi
+                       </button>
+                     </div>
+                   </div>
+                 </div>
+               )}
             </div>
           )}
 

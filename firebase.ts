@@ -19,4 +19,5 @@ export const DB_PATHS = {
   PRODUCTS: 'san_pham_ban_le',  // Products
   WORKFLOWS: 'quy_trinh',       // Workflows
   MEMBERS: 'nhan_su',           // Members
+  NOTIFICATIONS: 'thong_bao',  // Notifications
 };

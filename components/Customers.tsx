@@ -1,9 +1,113 @@
-import React from 'react';
-import { Users, Search, Filter, MoreHorizontal, Star, Phone, Mail, MapPin, Plus } from 'lucide-react';
+import React, { useState, useMemo, useRef, useEffect } from 'react';
+import { Users, Search, Filter, MoreHorizontal, Star, Phone, Mail, MapPin, Plus, Eye, Edit, Trash2 } from 'lucide-react';
 import { MOCK_CUSTOMERS } from '../constants';
 import { Customer } from '../types';
+import { TableFilter, FilterState, filterByDateRange } from './TableFilter';
+
+// Action Menu Component
+const ActionMenu: React.FC<{ 
+  onView: () => void;
+  onEdit: () => void;
+  onDelete: () => void;
+  itemName: string;
+}> = ({ onView, onEdit, onDelete, itemName }) => {
+  const [isOpen, setIsOpen] = useState(false);
+  const menuRef = useRef<HTMLDivElement>(null);
+
+  useEffect(() => {
+    const handleClickOutside = (event: MouseEvent) => {
+      if (menuRef.current && !menuRef.current.contains(event.target as Node)) {
+        setIsOpen(false);
+      }
+    };
+    document.addEventListener('mousedown', handleClickOutside);
+    return () => document.removeEventListener('mousedown', handleClickOutside);
+  }, []);
+
+  return (
+    <div className="relative" ref={menuRef}>
+      <button
+        onClick={(e) => {
+          e.stopPropagation();
+          setIsOpen(!isOpen);
+        }}
+        className="p-2 hover:bg-neutral-800 rounded-lg text-slate-500 hover:text-slate-300 transition-colors"
+      >
+        <MoreHorizontal size={20} />
+      </button>
+      
+      {isOpen && (
+        <div className="absolute right-0 top-full mt-1 bg-neutral-800 border border-neutral-700 rounded-lg shadow-xl z-50 min-w-[140px] overflow-hidden">
+          <button
+            onClick={(e) => {
+              e.stopPropagation();
+              onView();
+              setIsOpen(false);
+            }}
+            className="w-full px-4 py-2.5 text-left text-sm text-slate-300 hover:bg-neutral-700 flex items-center gap-2 transition-colors"
+          >
+            <Eye size={16} />
+            Xem
+          </button>
+          <button
+            onClick={(e) => {
+              e.stopPropagation();
+              onEdit();
+              setIsOpen(false);
+            }}
+            className="w-full px-4 py-2.5 text-left text-sm text-slate-300 hover:bg-neutral-700 flex items-center gap-2 transition-colors"
+          >
+            <Edit size={16} />
+            Sửa
+          </button>
+          <button
+            onClick={(e) => {
+              e.stopPropagation();
+              if (window.confirm(`Bạn có chắc chắn muốn xóa "${itemName}"?`)) {
+                onDelete();
+              }
+              setIsOpen(false);
+            }}
+            className="w-full px-4 py-2.5 text-left text-sm text-red-400 hover:bg-red-900/20 flex items-center gap-2 transition-colors"
+          >
+            <Trash2 size={16} />
+            Xóa
+          </button>
+        </div>
+      )}
+    </div>
+  );
+};
 
 export const Customers: React.FC = () => {
+  const [filter, setFilter] = useState<FilterState>({ locNhanh: 'all', thoiGian: { tuNgay: null, denNgay: null } });
+  const [searchText, setSearchText] = useState('');
+  const [showAddModal, setShowAddModal] = useState(false);
+  const [newCustomer, setNewCustomer] = useState({
+    name: '',
+    phone: '',
+    email: '',
+    address: '',
+    tier: 'Standard' as Customer['tier'],
+    notes: ''
+  });
+
+  // Lọc dữ liệu theo thời gian và tìm kiếm
+  const filteredCustomers = useMemo(() => {
+    let result = filterByDateRange(MOCK_CUSTOMERS, filter, 'lastVisit');
+    
+    if (searchText.trim()) {
+      const search = searchText.toLowerCase();
+      result = result.filter(c => 
+        c.name.toLowerCase().includes(search) ||
+        c.phone.includes(search) ||
+        c.email.toLowerCase().includes(search)
+      );
+    }
+    
+    return result;
+  }, [filter, searchText]);
+
   const getTierColor = (tier: Customer['tier']) => {
     switch (tier) {
       case 'VVIP': return 'bg-gradient-to-r from-gold-600 to-gold-400 text-black border-gold-500 shadow-gold-900/50';
@@ -12,17 +116,151 @@ export const Customers: React.FC = () => {
     }
   };
 
+  const handleAddCustomer = () => {
+    if (!newCustomer.name || !newCustomer.phone) {
+      alert('Vui lòng nhập tên và số điện thoại!');
+      return;
+    }
+    
+    alert(`Thêm khách hàng thành công!\n\nTên: ${newCustomer.name}\nSĐT: ${newCustomer.phone}\nEmail: ${newCustomer.email}\nHạng: ${newCustomer.tier}\n\nChức năng lưu vào Firebase đang phát triển...`);
+    
+    // Reset form
+    setNewCustomer({
+      name: '',
+      phone: '',
+      email: '',
+      address: '',
+      tier: 'Standard',
+      notes: ''
+    });
+    setShowAddModal(false);
+  };
+
   return (
     <div className="space-y-6">
+      {/* Modal Thêm Khách Hàng */}
+      {showAddModal && (
+        <div className="fixed inset-0 bg-black/60 backdrop-blur-sm flex items-center justify-center z-50 p-4">
+          <div className="bg-neutral-900 rounded-xl shadow-2xl border border-neutral-800 w-full max-w-2xl max-h-[90vh] overflow-y-auto">
+            <div className="sticky top-0 bg-neutral-900 border-b border-neutral-800 p-6 flex justify-between items-center">
+              <h2 className="text-xl font-serif font-bold text-slate-100">Thêm Khách Hàng Mới</h2>
+              <button 
+                onClick={() => setShowAddModal(false)}
+                className="text-slate-500 hover:text-slate-300 transition-colors"
+              >
+                ✕
+              </button>
+            </div>
+            
+            <div className="p-6 space-y-4">
+              <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
+                <div>
+                  <label className="block text-sm font-medium text-slate-400 mb-2">
+                    Tên khách hàng <span className="text-red-500">*</span>
+                  </label>
+                  <input
+                    type="text"
+                    value={newCustomer.name}
+                    onChange={(e) => setNewCustomer({...newCustomer, name: e.target.value})}
+                    placeholder="Nguyễn Văn A"
+                    className="w-full px-4 py-2 bg-neutral-800 border border-neutral-700 rounded-lg text-slate-200 focus:ring-2 focus:ring-gold-500 outline-none transition-all placeholder-slate-600"
+                  />
+                </div>
+                
+                <div>
+                  <label className="block text-sm font-medium text-slate-400 mb-2">
+                    Số điện thoại <span className="text-red-500">*</span>
+                  </label>
+                  <input
+                    type="tel"
+                    value={newCustomer.phone}
+                    onChange={(e) => setNewCustomer({...newCustomer, phone: e.target.value})}
+                    placeholder="0909 123 456"
+                    className="w-full px-4 py-2 bg-neutral-800 border border-neutral-700 rounded-lg text-slate-200 focus:ring-2 focus:ring-gold-500 outline-none transition-all placeholder-slate-600"
+                  />
+                </div>
+              </div>
+              
+              <div>
+                <label className="block text-sm font-medium text-slate-400 mb-2">Email</label>
+                <input
+                  type="email"
+                  value={newCustomer.email}
+                  onChange={(e) => setNewCustomer({...newCustomer, email: e.target.value})}
+                  placeholder="example@gmail.com"
+                  className="w-full px-4 py-2 bg-neutral-800 border border-neutral-700 rounded-lg text-slate-200 focus:ring-2 focus:ring-gold-500 outline-none transition-all placeholder-slate-600"
+                />
+              </div>
+              
+              <div>
+                <label className="block text-sm font-medium text-slate-400 mb-2">Địa chỉ</label>
+                <input
+                  type="text"
+                  value={newCustomer.address}
+                  onChange={(e) => setNewCustomer({...newCustomer, address: e.target.value})}
+                  placeholder="Quận 1, TP.HCM"
+                  className="w-full px-4 py-2 bg-neutral-800 border border-neutral-700 rounded-lg text-slate-200 focus:ring-2 focus:ring-gold-500 outline-none transition-all placeholder-slate-600"
+                />
+              </div>
+              
+              <div>
+                <label className="block text-sm font-medium text-slate-400 mb-2">Hạng khách hàng</label>
+                <select
+                  value={newCustomer.tier}
+                  onChange={(e) => setNewCustomer({...newCustomer, tier: e.target.value as Customer['tier']})}
+                  className="w-full px-4 py-2 bg-neutral-800 border border-neutral-700 rounded-lg text-slate-200 focus:ring-2 focus:ring-gold-500 outline-none transition-all"
+                >
+                  <option value="Standard">Standard</option>
+                  <option value="VIP">VIP</option>
+                  <option value="VVIP">VVIP</option>
+                </select>
+              </div>
+              
+              <div>
+                <label className="block text-sm font-medium text-slate-400 mb-2">Ghi chú</label>
+                <textarea
+                  value={newCustomer.notes}
+                  onChange={(e) => setNewCustomer({...newCustomer, notes: e.target.value})}
+                  placeholder="Ghi chú về khách hàng..."
+                  rows={3}
+                  className="w-full px-4 py-2 bg-neutral-800 border border-neutral-700 rounded-lg text-slate-200 focus:ring-2 focus:ring-gold-500 outline-none transition-all placeholder-slate-600 resize-none"
+                />
+              </div>
+            </div>
+            
+            <div className="sticky bottom-0 bg-neutral-900 border-t border-neutral-800 p-6 flex gap-3 justify-end">
+              <button
+                onClick={() => setShowAddModal(false)}
+                className="px-6 py-2.5 border border-neutral-700 bg-neutral-800 text-slate-300 rounded-lg hover:bg-neutral-700 transition-colors"
+              >
+                Hủy
+              </button>
+              <button
+                onClick={handleAddCustomer}
+                className="px-6 py-2.5 bg-gold-600 hover:bg-gold-700 text-black font-medium rounded-lg shadow-lg shadow-gold-900/20 transition-all"
+              >
+                Thêm Khách Hàng
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
+
       <div className="flex flex-col sm:flex-row justify-between items-start sm:items-center gap-4">
         <div>
           <h1 className="text-2xl font-serif font-bold text-slate-100">Quản Lý Khách Hàng</h1>
           <p className="text-slate-500 mt-1">Hồ sơ khách hàng, lịch sử chi tiêu và hạng thành viên.</p>
         </div>
-        <button className="flex items-center gap-2 bg-gold-600 hover:bg-gold-700 text-black font-medium px-4 py-2.5 rounded-lg shadow-lg shadow-gold-900/20 transition-all">
-          <Plus size={18} />
-          <span>Thêm Khách Mới</span>
-        </button>
+        <div style={{ position: 'relative', zIndex: 1000 }}>
+          <button 
+            type="button"
+            onClick={() => setShowAddModal(true)}
+            className="flex items-center gap-2 bg-gold-600 hover:bg-gold-700 text-black font-medium px-4 py-2.5 rounded-lg shadow-lg shadow-gold-900/20 transition-all cursor-pointer"
+          >
+            <Plus size={18} />
+            <span>Thêm Khách Mới</span>
+          </button>
+        </div>
       </div>
 
       {/* Quick Stats */}
@@ -69,82 +307,75 @@ export const Customers: React.FC = () => {
             <input 
               type="text" 
               placeholder="Tìm theo tên, SĐT, email..." 
+              value={searchText}
+              onChange={(e) => setSearchText(e.target.value)}
               className="w-full pl-10 pr-4 py-2 bg-neutral-800 border border-neutral-700 rounded-lg text-slate-200 focus:ring-1 focus:ring-gold-500 outline-none transition-all placeholder-slate-600"
             />
           </div>
-          <div className="flex gap-2">
+          <div className="flex gap-2 flex-wrap">
+            <TableFilter onFilterChange={setFilter} />
             <button className="flex items-center gap-2 px-3 py-2 border border-neutral-700 bg-neutral-800 text-slate-300 rounded-lg hover:bg-neutral-700 hover:text-white transition-colors">
                <Filter size={16} />
                <span>Phân hạng</span>
             </button>
-            <button className="flex items-center gap-2 px-3 py-2 border border-neutral-700 bg-neutral-800 text-slate-300 rounded-lg hover:bg-neutral-700 hover:text-white transition-colors">
-               <Filter size={16} />
-               <span>Chi tiêu</span>
-            </button>
           </div>
         </div>
 
-        {/* Table */}
-        <div className="overflow-x-auto">
-          <table className="w-full text-left border-collapse">
-            <thead>
-              <tr className="bg-neutral-800/50 border-b border-neutral-800">
-                <th className="p-4 font-semibold text-slate-400 text-sm w-16">ID</th>
-                <th className="p-4 font-semibold text-slate-400 text-sm">Thông Tin Khách Hàng</th>
-                <th className="p-4 font-semibold text-slate-400 text-sm">Hạng</th>
-                <th className="p-4 font-semibold text-slate-400 text-sm text-right">Tổng Chi Tiêu</th>
-                <th className="p-4 font-semibold text-slate-400 text-sm">Lần Cuối</th>
-                <th className="p-4 font-semibold text-slate-400 text-sm">Thao Tác</th>
-              </tr>
-            </thead>
-            <tbody className="divide-y divide-neutral-800">
-              {MOCK_CUSTOMERS.map((customer) => (
-                <tr key={customer.id} className="hover:bg-neutral-800 transition-colors cursor-pointer group">
-                  <td className="p-4 font-mono text-xs text-slate-600">{customer.id}</td>
-                  <td className="p-4">
-                    <div className="flex gap-3 items-center">
-                        <div className="w-10 h-10 rounded-full bg-neutral-800 flex items-center justify-center text-slate-400 font-bold border border-neutral-700 shadow-sm">
-                            {customer.name.charAt(0)}
-                        </div>
-                        <div>
-                            <div className="font-semibold text-slate-200 group-hover:text-gold-400 transition-colors">{customer.name}</div>
-                            <div className="flex items-center gap-3 text-xs text-slate-500 mt-0.5">
-                                <span className="flex items-center gap-1"><Phone size={10} /> {customer.phone}</span>
-                                <span className="hidden sm:flex items-center gap-1"><Mail size={10} /> {customer.email}</span>
-                            </div>
-                        </div>
+        {/* Customers List */}
+        <div className="p-4 space-y-4">
+          {filteredCustomers.length === 0 ? (
+            <div className="p-8 text-center text-slate-500">
+              Không tìm thấy khách hàng nào phù hợp với bộ lọc
+            </div>
+          ) : filteredCustomers.map((customer) => (
+            <div key={customer.id} className="bg-neutral-900 p-4 rounded-xl shadow-lg shadow-black/20 border border-neutral-800 flex gap-6 items-center hover:border-gold-900/30 transition-all">
+              <div className="w-24 h-24 rounded-lg bg-neutral-800 flex items-center justify-center text-slate-400 font-bold text-2xl border border-neutral-700 flex-shrink-0">
+                {customer.name.charAt(0)}
+              </div>
+              <div className="flex-1">
+                <div className="flex justify-between items-start">
+                  <div>
+                    <h3 className="font-bold text-lg text-slate-100">{customer.name}</h3>
+                    <div className="flex items-center gap-3 text-sm mt-1">
+                      <span className="font-mono text-slate-600 text-xs">#{customer.id}</span>
+                      <span className="flex items-center gap-1 text-slate-400"><Phone size={12} /> {customer.phone}</span>
+                      <span className="flex items-center gap-1 text-slate-400"><Mail size={12} /> {customer.email}</span>
                     </div>
-                  </td>
-                  <td className="p-4">
+                  </div>
+                  <ActionMenu
+                    itemName={customer.name}
+                    onView={() => alert(`Xem chi tiết khách hàng: ${customer.name}\n\nID: ${customer.id}\nHạng: ${customer.tier}\nSĐT: ${customer.phone}\nEmail: ${customer.email}\nĐịa chỉ: ${customer.address || 'Chưa có'}\nTổng chi tiêu: ${customer.totalSpent.toLocaleString()} ₫\nLần cuối: ${customer.lastVisit}\nGhi chú: ${customer.notes || 'Không có'}`)}
+                    onEdit={() => alert(`Chỉnh sửa khách hàng: ${customer.name}\n\nChức năng đang phát triển...`)}
+                    onDelete={() => alert(`Đã xóa khách hàng: ${customer.name}\n\nChức năng lưu vào Firebase đang phát triển...`)}
+                  />
+                </div>
+                
+                <div className="mt-4 flex items-center justify-between">
+                  <div className="flex items-center gap-4">
                     <span className={`inline-flex items-center gap-1 px-2.5 py-1 rounded-full text-xs font-bold border shadow-sm ${getTierColor(customer.tier)}`}>
                       {customer.tier === 'VVIP' && <Star size={10} fill="currentColor" />}
                       {customer.tier}
                     </span>
-                  </td>
-                  <td className="p-4 text-right">
-                    <div className="font-bold text-slate-200">{customer.totalSpent.toLocaleString()} ₫</div>
-                    {customer.totalSpent > 50000000 && (
-                        <div className="text-[10px] text-gold-500 font-medium">Top spender</div>
+                    <div className="text-sm text-slate-400">
+                      Lần cuối: <span className="text-slate-300">{customer.lastVisit}</span>
+                    </div>
+                    {customer.address && (
+                      <div className="text-xs text-slate-500 flex items-center gap-1">
+                        <MapPin size={12} />
+                        <span className="truncate max-w-[200px]">{customer.address}</span>
+                      </div>
                     )}
-                  </td>
-                  <td className="p-4">
-                     <div className="text-sm text-slate-400">{customer.lastVisit}</div>
-                     {customer.address && (
-                         <div className="text-[10px] text-slate-600 mt-1 flex items-center gap-1 truncate max-w-[150px]">
-                            <MapPin size={10} />
-                            {customer.address}
-                         </div>
-                     )}
-                  </td>
-                  <td className="p-4">
-                    <button className="p-2 hover:bg-neutral-800 rounded-lg text-slate-500 hover:text-slate-300 transition-colors">
-                      <MoreHorizontal size={18} />
-                    </button>
-                  </td>
-                </tr>
-              ))}
-            </tbody>
-          </table>
+                  </div>
+                  <div className="text-right">
+                    <div className="font-bold text-lg text-gold-500">{customer.totalSpent.toLocaleString()} ₫</div>
+                    {customer.totalSpent > 50000000 && (
+                      <div className="text-[10px] text-gold-500 font-medium">Top spender</div>
+                    )}
+                  </div>
+                </div>
+              </div>
+            </div>
+          ))}
         </div>
       </div>
     </div>

@@ -1,8 +1,10 @@
-import React, { useState, useMemo } from 'react';
+import React, { useState, useMemo, useEffect } from 'react';
 import { MOCK_MEMBERS, MOCK_WORKFLOWS } from '../constants';
-import { ServiceItem, ServiceType } from '../types';
+import { ServiceItem, ServiceType, WorkflowDefinition } from '../types';
 import { useAppStore } from '../context'; 
 import { MoreHorizontal, Calendar, User, Columns, Layers, ChevronRight, Briefcase, XCircle, AlertTriangle, RotateCcw, History, Clock, Info } from 'lucide-react';
+import { ref, get, onValue } from 'firebase/database';
+import { db, DB_PATHS } from '../firebase';
 
 interface KanbanItem extends ServiceItem {
   orderId: string;
@@ -23,7 +25,8 @@ interface ActivityLog {
   type: 'info' | 'warning' | 'danger';
 }
 
-const COLUMNS = [
+// Default columns fallback
+const DEFAULT_COLUMNS = [
   { id: 'In Queue', title: 'Chờ Xử Lý', color: 'bg-neutral-900', dot: 'bg-slate-500' },
   { id: 'Cleaning', title: 'Vệ Sinh', color: 'bg-blue-900/10', dot: 'bg-blue-500' },
   { id: 'Repairing', title: 'Sửa Chữa', color: 'bg-orange-900/10', dot: 'bg-orange-500' },
@@ -31,31 +34,166 @@ const COLUMNS = [
   { id: 'Ready', title: 'Hoàn Thành', color: 'bg-emerald-900/10', dot: 'bg-emerald-500' },
 ];
 
-const WORKFLOWS_FILTER = [
-  { id: 'ALL', label: 'Tất cả công việc', types: [] as ServiceType[], color: 'bg-neutral-800 text-slate-400' },
-  ...MOCK_WORKFLOWS
-];
-
 const CURRENT_USER = MOCK_MEMBERS[0]; 
 
 export const KanbanBoard: React.FC = () => {
-  const { orders, updateOrderItemStatus } = useAppStore(); 
+  const { orders, updateOrderItemStatus } = useAppStore();
+  const [workflows, setWorkflows] = useState<WorkflowDefinition[]>(MOCK_WORKFLOWS);
 
-  const items: KanbanItem[] = orders.flatMap(order => 
-    order.items
-      .filter(item => !item.isProduct)
-      .map(item => ({
-        ...item,
-        orderId: order.id,
-        customerName: order.customerName,
-        expectedDelivery: order.expectedDelivery
-      }))
-  );
+  // Load workflows from Firebase
+  useEffect(() => {
+    const loadWorkflows = async () => {
+      try {
+        const snapshot = await get(ref(db, DB_PATHS.WORKFLOWS));
+        if (snapshot.exists()) {
+          const data = snapshot.val();
+          const workflowsList: WorkflowDefinition[] = Object.keys(data).map(key => {
+            const wf = data[key];
+            return {
+              id: wf.id || key,
+              label: wf.label || '',
+              description: wf.description || '',
+              department: wf.department || 'Kỹ Thuật',
+              types: wf.types || [],
+              color: wf.color || 'bg-blue-900/30 text-blue-400 border-blue-800',
+              materials: wf.materials || undefined,
+              stages: wf.stages || undefined,
+              assignedMembers: wf.assignedMembers || undefined
+            } as WorkflowDefinition;
+          });
+          setWorkflows(workflowsList);
+        } else {
+          setWorkflows(MOCK_WORKFLOWS);
+        }
+      } catch (error) {
+        console.error('Error loading workflows:', error);
+        setWorkflows(MOCK_WORKFLOWS);
+      }
+    };
+
+    loadWorkflows();
+
+    // Listen for real-time updates
+    const workflowsRef = ref(db, DB_PATHS.WORKFLOWS);
+    const unsubscribe = onValue(workflowsRef, (snapshot) => {
+      try {
+        if (snapshot.exists()) {
+          const data = snapshot.val();
+          const workflowsList: WorkflowDefinition[] = Object.keys(data).map(key => {
+            const wf = data[key];
+            return {
+              id: wf.id || key,
+              label: wf.label || '',
+              description: wf.description || '',
+              department: wf.department || 'Kỹ Thuật',
+              types: wf.types || [],
+              color: wf.color || 'bg-blue-900/30 text-blue-400 border-blue-800',
+              materials: wf.materials || undefined,
+              stages: wf.stages || undefined,
+              assignedMembers: wf.assignedMembers || undefined
+            } as WorkflowDefinition;
+          });
+          setWorkflows(workflowsList);
+        } else {
+          setWorkflows(MOCK_WORKFLOWS);
+        }
+      } catch (error) {
+        console.error('Error in real-time listener:', error);
+        setWorkflows(MOCK_WORKFLOWS);
+      }
+    });
+
+    return () => unsubscribe();
+  }, []);
+
+  const WORKFLOWS_FILTER = useMemo(() => [
+    { id: 'ALL', label: 'Tất cả công việc', types: [] as ServiceType[], color: 'bg-neutral-800 text-slate-400' },
+    ...workflows
+  ], [workflows]); 
+
+  // Helper to map old status to new stage IDs - must be defined before useMemo that uses it
+  const mapStatusToStageId = (status: string): string => {
+    const statusMap: Record<string, string> = {
+      'In Queue': 'in-queue',
+      'Cleaning': 'cleaning',
+      'Repairing': 'repairing',
+      'QC': 'qc',
+      'Ready': 'ready',
+      'Done': 'ready'
+    };
+    return statusMap[status] || status.toLowerCase().replace(/\s+/g, '-');
+  };
+
+  const items: KanbanItem[] = useMemo(() => {
+    const allItems = orders.flatMap(order => 
+      order.items
+        .filter(item => !item.isProduct)
+        .map(item => ({
+          ...item,
+          orderId: order.id,
+          customerName: order.customerName,
+          expectedDelivery: order.expectedDelivery
+        }))
+    );
+    
+    console.log('Kanban items:', {
+      totalOrders: orders.length,
+      totalItems: allItems.length,
+      items: allItems.map(i => ({ id: i.id, name: i.name, status: i.status, type: i.type }))
+    });
+    
+    return allItems;
+  }, [orders]);
 
   const [draggedItem, setDraggedItem] = useState<KanbanItem | null>(null);
   const [activeWorkflow, setActiveWorkflow] = useState<string>('ALL');
   const [logs, setLogs] = useState<ActivityLog[]>([]);
   const [showHistory, setShowHistory] = useState(false);
+  const [selectedItem, setSelectedItem] = useState<KanbanItem | null>(null);
+
+  // Get columns from active workflow
+  const columns = useMemo(() => {
+    if (activeWorkflow === 'ALL') {
+      // Get all unique stages from all workflows
+      const allStages = workflows.flatMap(wf => wf.stages || []);
+      const uniqueStages = Array.from(
+        new Map(allStages.map(s => [s.id, s])).values()
+      ).sort((a, b) => a.order - b.order);
+      
+      if (uniqueStages.length > 0) {
+        return uniqueStages.map(stage => ({
+          id: stage.id,
+          title: stage.name,
+          color: stage.color ? stage.color.replace('-500', '-900/10') : 'bg-neutral-900',
+          dot: stage.color || 'bg-slate-500'
+        }));
+      }
+      // Fallback: map default columns to stage format
+      return DEFAULT_COLUMNS.map(col => ({
+        id: mapStatusToStageId(col.id),
+        title: col.title,
+        color: col.color,
+        dot: col.dot
+      }));
+    } else {
+      const workflow = workflows.find(wf => wf.id === activeWorkflow);
+      if (workflow?.stages && workflow.stages.length > 0) {
+        return workflow.stages.sort((a, b) => a.order - b.order).map(stage => ({
+          id: stage.id,
+          title: stage.name,
+          color: stage.color ? stage.color.replace('-500', '-900/10') : 'bg-neutral-900',
+          dot: stage.color || 'bg-slate-500'
+        }));
+      }
+      // Fallback: map default columns to stage format
+      return DEFAULT_COLUMNS.map(col => ({
+        id: mapStatusToStageId(col.id),
+        title: col.title,
+        color: col.color,
+        dot: col.dot
+      }));
+    }
+  }, [activeWorkflow, workflows]);
 
   const [modalConfig, setModalConfig] = useState<{
     isOpen: boolean;
@@ -98,13 +236,13 @@ export const KanbanBoard: React.FC = () => {
         return;
     }
 
-    const validStatus = COLUMNS.find(c => c.id === statusId);
+    const validStatus = columns.find(c => c.id === statusId);
     if (!validStatus) return;
 
-    const oldIndex = COLUMNS.findIndex(c => c.id === draggedItem.status);
-    const newIndex = COLUMNS.findIndex(c => c.id === statusId);
+    const oldIndex = columns.findIndex(c => c.id === draggedItem.status);
+    const newIndex = columns.findIndex(c => c.id === statusId);
 
-    const oldStatusTitle = COLUMNS.find(c => c.id === draggedItem.status)?.title;
+    const oldStatusTitle = columns.find(c => c.id === draggedItem.status)?.title;
     const newStatusTitle = validStatus.title;
 
     if (newIndex < oldIndex) {
@@ -139,13 +277,13 @@ export const KanbanBoard: React.FC = () => {
        return;
     }
 
-    const oldStatusTitle = COLUMNS.find(c => c.id === modalConfig.item?.status)?.title;
+    const oldStatusTitle = columns.find(c => c.id === modalConfig.item?.status)?.title;
 
     if (modalConfig.type === 'CANCEL') {
       addVisualLog('Hủy công việc', modalConfig.item.name, `Lý do: ${reasonInput}`, 'danger');
     } 
     else if (modalConfig.type === 'BACKWARD' && modalConfig.targetStatus) {
-      const newStatusTitle = COLUMNS.find(c => c.id === modalConfig.targetStatus)?.title;
+      const newStatusTitle = columns.find(c => c.id === modalConfig.targetStatus)?.title;
       updateOrderItemStatus(modalConfig.item.orderId, modalConfig.item.id, modalConfig.targetStatus, CURRENT_USER.name, reasonInput);
       addVisualLog('Trả lại quy trình', modalConfig.item.name, `Từ [${oldStatusTitle}] về [${newStatusTitle}]. Ghi chú: ${reasonInput}`, 'warning');
     }
@@ -160,13 +298,30 @@ export const KanbanBoard: React.FC = () => {
 
   const filteredItems = useMemo(() => {
     if (activeWorkflow === 'ALL') return items;
-    const currentWorkflow = WORKFLOWS_FILTER.find(w => w.id === activeWorkflow);
-    return items.filter(item => currentWorkflow?.types.includes(item.type));
-  }, [items, activeWorkflow]);
+    const currentWorkflow = workflows.find(w => w.id === activeWorkflow);
+    if (!currentWorkflow) return items;
+    
+    // If workflow has types, filter by types
+    if (currentWorkflow.types && currentWorkflow.types.length > 0) {
+      return items.filter(item => currentWorkflow.types.includes(item.type));
+    }
+    
+    // If no types defined, show all items (workflow might be for all types)
+    return items;
+  }, [items, activeWorkflow, workflows]);
 
   const getWorkflowCount = (workflowId: string, types: ServiceType[]) => {
     if (workflowId === 'ALL') return items.length;
-    return items.filter(item => types.includes(item.type)).length;
+    const currentWorkflow = workflows.find(w => w.id === workflowId);
+    if (!currentWorkflow) return 0;
+    
+    // If workflow has types, filter by types
+    if (currentWorkflow.types && currentWorkflow.types.length > 0) {
+      return items.filter(item => currentWorkflow.types.includes(item.type)).length;
+    }
+    
+    // If no types defined, show all items (workflow might be for all types)
+    return items.length;
   };
 
   const formatDuration = (ms: number) => {
@@ -238,8 +393,26 @@ export const KanbanBoard: React.FC = () => {
         {/* Right Content: Kanban Board */}
         <div className="flex-1 overflow-x-auto overflow-y-hidden pb-4 bg-neutral-900/50 rounded-xl border border-neutral-800 p-1">
           <div className="flex h-full gap-6 min-w-[1200px] p-4">
-            {COLUMNS.map(col => {
-              const colItems = filteredItems.filter(i => i.status === col.id);
+            {columns.map(col => {
+              const colItems = filteredItems.filter(i => {
+                // Try exact match first
+                if (i.status === col.id) return true;
+                
+                // Try mapping status to stage ID
+                const itemStatusId = mapStatusToStageId(i.status);
+                if (itemStatusId === col.id) return true;
+                
+                // Try case-insensitive match
+                if (i.status.toLowerCase() === col.id.toLowerCase()) return true;
+                
+                // Try matching with stage name (for backward compatibility)
+                const stage = workflows.flatMap(wf => wf.stages || []).find(s => s.id === col.id);
+                if (stage && (i.status === stage.name || i.status.toLowerCase() === stage.name.toLowerCase())) {
+                  return true;
+                }
+                
+                return false;
+              });
               
               return (
                 <div 

@@ -1,4 +1,4 @@
-import { Order, OrderStatus, ServiceType, Customer, CRMTask, RevenueStat, InventoryItem, Member, ServiceCatalogItem, Product, WorkflowDefinition, CompanyConfig, RoleConfig, SalaryConfig } from './types';
+import { Order, OrderStatus, ServiceType, Customer, CRMTask, RevenueStat, InventoryItem, Member, ServiceCatalogItem, Product, WorkflowDefinition, WorkflowStage, CompanyConfig, RoleConfig, SalaryConfig } from './types';
 
 // --- 3. KHO VẬN (INVENTORY) ---
 export const MOCK_INVENTORY: InventoryItem[] = [
@@ -95,6 +95,12 @@ export const MOCK_WORKFLOWS: WorkflowDefinition[] = [
     materials: [
       { inventoryItemId: 'INV002', quantity: 0.1 }, // 100ml Angelus
       { inventoryItemId: 'INV005', quantity: 2 }    // 2 Khăn
+    ],
+    stages: [
+      { id: 'in-queue', name: 'Chờ Xử Lý', order: 0, color: 'bg-slate-500' },
+      { id: 'cleaning', name: 'Vệ Sinh', order: 1, color: 'bg-blue-500' },
+      { id: 'qc', name: 'Kiểm Tra', order: 2, color: 'bg-purple-500' },
+      { id: 'ready', name: 'Hoàn Thành', order: 3, color: 'bg-emerald-500' }
     ]
   },
   { 
@@ -106,6 +112,12 @@ export const MOCK_WORKFLOWS: WorkflowDefinition[] = [
     department: 'Kỹ Thuật',
     materials: [
       { inventoryItemId: 'INV001', quantity: 1 } // 1 Hộp Xi
+    ],
+    stages: [
+      { id: 'in-queue', name: 'Chờ Xử Lý', order: 0, color: 'bg-slate-500' },
+      { id: 'repairing', name: 'Sửa Chữa', order: 1, color: 'bg-orange-500' },
+      { id: 'qc', name: 'Kiểm Tra', order: 2, color: 'bg-purple-500' },
+      { id: 'ready', name: 'Hoàn Thành', order: 3, color: 'bg-emerald-500' }
     ]
   },
   { 
@@ -117,6 +129,12 @@ export const MOCK_WORKFLOWS: WorkflowDefinition[] = [
     department: 'Kỹ Thuật',
     materials: [
       { inventoryItemId: 'INV006', quantity: 0.05 } // 50ml vàng
+    ],
+    stages: [
+      { id: 'in-queue', name: 'Chờ Xử Lý', order: 0, color: 'bg-slate-500' },
+      { id: 'plating', name: 'Xi Mạ', order: 1, color: 'bg-yellow-500' },
+      { id: 'qc', name: 'Kiểm Tra', order: 2, color: 'bg-purple-500' },
+      { id: 'ready', name: 'Hoàn Thành', order: 3, color: 'bg-emerald-500' }
     ]
   },
   { 
@@ -125,7 +143,12 @@ export const MOCK_WORKFLOWS: WorkflowDefinition[] = [
     types: [],
     description: 'Kiểm tra chất lượng cuối cùng trước khi đóng gói.',
     color: 'bg-purple-900/30 text-purple-400 border-purple-800',
-    department: 'QA/QC'
+    department: 'QA/QC',
+    stages: [
+      { id: 'in-queue', name: 'Chờ Kiểm Tra', order: 0, color: 'bg-slate-500' },
+      { id: 'qc', name: 'Kiểm Tra QC', order: 1, color: 'bg-purple-500' },
+      { id: 'ready', name: 'Đạt Chuẩn', order: 2, color: 'bg-emerald-500' }
+    ]
   }
 ];
 
@@ -137,7 +160,7 @@ export const DEFAULT_COMPANY_CONFIG: CompanyConfig = {
   phone: '0909 888 999',
   email: 'contact@xoxo.vn',
   website: 'www.xoxoluxury.vn',
-  logoUrl: 'https://via.placeholder.com/150/000000/FFFFFF?text=XOXO',
+  logoUrl: 'https://www.appsheet.com/template/gettablefileurl?appName=Appsheet-325045268&tableName=Kho%20%E1%BA%A3nh&fileName=Kho%20%E1%BA%A3nh_Images%2F23b33b0b.%E1%BA%A2nh.091749.jpg',
   themeColor: '#c68a35' // Gold
 };
 
@@ -257,7 +280,9 @@ export const SERVICE_CATALOG: ServiceCatalogItem[] = [
   { 
     id: 'SVC-001', 
     name: 'Spa Túi Xách Basic', 
-    category: 'Túi Xách', 
+    category: 'Túi Xách',
+    categoryPath: ['cat-1', 'cat-1-1', 'cat-1-1-1', 'cat-1-1-1-1'],
+    tier: '1',
     price: 800000, 
     desc: 'Vệ sinh bề mặt, dưỡng da, khử mùi nhẹ.', 
     workflowId: 'SPA',
@@ -266,7 +291,9 @@ export const SERVICE_CATALOG: ServiceCatalogItem[] = [
   { 
     id: 'SVC-002', 
     name: 'Spa Túi Xách Deep Clean', 
-    category: 'Túi Xách', 
+    category: 'Túi Xách',
+    categoryPath: ['cat-1', 'cat-1-1', 'cat-1-1-1', 'cat-1-1-1-3'],
+    tier: '2',
     price: 1500000, 
     desc: 'Vệ sinh sâu, xử lý nấm mốc, khử mùi ozon, dưỡng da chuyên sâu.', 
     workflowId: 'SPA',
@@ -275,7 +302,9 @@ export const SERVICE_CATALOG: ServiceCatalogItem[] = [
   { 
     id: 'SVC-003', 
     name: 'Phục Hồi Màu Túi (Retouch)', 
-    category: 'Sửa Chữa', 
+    category: 'Sửa Chữa',
+    categoryPath: ['cat-1', 'cat-1-2', 'cat-1-2-1', 'cat-1-2-1-1'],
+    tier: '3',
     price: 2500000, 
     desc: 'Dặm màu các vết xước góc, trầy xước bề mặt, phục hồi màu nguyên bản.', 
     workflowId: 'REPAIR',
@@ -284,7 +313,9 @@ export const SERVICE_CATALOG: ServiceCatalogItem[] = [
   { 
     id: 'SVC-004', 
     name: 'Đổi Màu Túi (Recolor)', 
-    category: 'Sửa Chữa', 
+    category: 'Sửa Chữa',
+    categoryPath: ['cat-1', 'cat-1-2', 'cat-1-2-1', 'cat-1-2-1-2'],
+    tier: '4',
     price: 4500000, 
     desc: 'Sơn đổi màu toàn bộ túi theo yêu cầu, phủ lớp bảo vệ.', 
     workflowId: 'REPAIR',
@@ -293,7 +324,9 @@ export const SERVICE_CATALOG: ServiceCatalogItem[] = [
   { 
     id: 'SVC-005', 
     name: 'Xi Mạ Vàng 18K/24K Logo', 
-    category: 'Xi Mạ', 
+    category: 'Xi Mạ',
+    categoryPath: ['cat-1', 'cat-1-3', 'cat-1-3-1', 'cat-1-3-1-1'],
+    tier: '4',
     price: 3000000, 
     desc: 'Mạ vàng thật cho logo, khoá kéo, chi tiết kim loại.', 
     workflowId: 'PLATING',
@@ -302,7 +335,9 @@ export const SERVICE_CATALOG: ServiceCatalogItem[] = [
   { 
     id: 'SVC-006', 
     name: 'Vệ Sinh Giày Sneaker', 
-    category: 'Giày', 
+    category: 'Giày',
+    categoryPath: ['cat-2', 'cat-2-1', 'cat-2-1-1', 'cat-2-1-1-1'],
+    tier: '1',
     price: 250000, 
     desc: 'Vệ sinh tay, chiếu UV diệt khuẩn, hong khô.', 
     workflowId: 'SPA',
@@ -311,7 +346,9 @@ export const SERVICE_CATALOG: ServiceCatalogItem[] = [
   { 
     id: 'SVC-007', 
     name: 'Patina Giày Tây', 
-    category: 'Giày', 
+    category: 'Giày',
+    categoryPath: ['cat-2', 'cat-2-1', 'cat-2-1-2', 'cat-2-1-2-2'],
+    tier: '3',
     price: 1800000, 
     desc: 'Đánh màu nghệ thuật Patina, tạo hiệu ứng chuyển màu sang trọng.', 
     workflowId: 'REPAIR',
@@ -320,7 +357,9 @@ export const SERVICE_CATALOG: ServiceCatalogItem[] = [
   { 
     id: 'SVC-008', 
     name: 'Dán Đế Vibram', 
-    category: 'Sửa Chữa', 
+    category: 'Sửa Chữa',
+    categoryPath: ['cat-2', 'cat-2-2', 'cat-2-2-1', 'cat-2-2-1-1'],
+    tier: '2',
     price: 850000, 
     desc: 'Dán đế bảo vệ chống trượt Vibram chính hãng.', 
     workflowId: 'REPAIR',

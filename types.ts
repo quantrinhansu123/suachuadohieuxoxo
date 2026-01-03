@@ -114,11 +114,30 @@ export interface Member {
   status: 'Active' | 'Off';
   avatar?: string;
   specialty?: string;
+  department?: 'Kỹ Thuật' | 'Spa' | 'QA/QC' | 'Hậu Cần' | 'Quản Lý' | 'Kinh Doanh';
 }
 
 export interface WorkflowMaterial {
   inventoryItemId: string;
   quantity: number;
+}
+
+export interface TodoStep {
+  id: string;
+  title: string;
+  description?: string;
+  completed: boolean;
+  order: number;
+}
+
+export interface WorkflowStage {
+  id: string;
+  name: string;
+  order: number;
+  color?: string;
+  details?: string; // Chi tiết
+  standards?: string; // Tiêu chuẩn
+  todos?: TodoStep[]; // Danh sách các bước nhỏ trong một bước lớn
 }
 
 export interface WorkflowDefinition {
@@ -129,16 +148,30 @@ export interface WorkflowDefinition {
   color: string;
   department: 'Kỹ Thuật' | 'Spa' | 'QA/QC' | 'Hậu Cần';
   materials?: WorkflowMaterial[];
+  stages?: WorkflowStage[];
+  assignedMembers?: string[]; // Array of member IDs
+}
+
+export interface ServiceCategory {
+  id: string;
+  name: string;
+  level: 1 | 2 | 3 | 4;
+  parentId?: string;
+  icon?: string;
+  color?: string;
+  children?: ServiceCategory[];
 }
 
 export interface ServiceCatalogItem {
   id: string;
   name: string;
   category: string;
+  categoryPath?: string[]; // Đường dẫn category từ cấp 1 đến cấp 4
+  tier?: '1' | '2' | '3' | '4'; // Service tier/level
   price: number;
   desc: string;
   image: string;
-  workflowId: string;
+  workflowId: string | string[]; // Có thể là một hoặc nhiều quy trình
 }
 
 export interface Product {
