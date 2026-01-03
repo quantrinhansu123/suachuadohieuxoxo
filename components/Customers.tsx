@@ -1,10 +1,11 @@
 import React, { useState, useMemo, useRef, useEffect } from 'react';
+import { createPortal } from 'react-dom';
 import { Users, Search, Filter, MoreHorizontal, Star, Phone, Mail, MapPin, Plus, Eye, Edit, Trash2 } from 'lucide-react';
 import { Customer } from '../types';
 import { useAppStore } from '../context';
 import { TableFilter, FilterState, filterByDateRange } from './TableFilter';
 
-// Action Menu Component
+// Action Menu Component with Portal
 const ActionMenu: React.FC<{
   onView: () => void;
   onEdit: () => void;
@@ -12,70 +13,96 @@ const ActionMenu: React.FC<{
   itemName: string;
 }> = ({ onView, onEdit, onDelete, itemName }) => {
   const [isOpen, setIsOpen] = useState(false);
-  const menuRef = useRef<HTMLDivElement>(null);
+  const buttonRef = useRef<HTMLButtonElement>(null);
+  const [coords, setCoords] = useState({ top: 0, left: 0 });
 
+  const toggleMenu = (e: React.MouseEvent) => {
+    e.stopPropagation();
+    if (!isOpen && buttonRef.current) {
+      const rect = buttonRef.current.getBoundingClientRect();
+      const menuWidth = 150; // Estimated width
+      setCoords({
+        top: rect.bottom + 4,
+        left: rect.right - menuWidth
+      });
+    }
+    setIsOpen(!isOpen);
+  };
+
+  // Close when scrolling or resizing
   useEffect(() => {
-    const handleClickOutside = (event: MouseEvent) => {
-      if (menuRef.current && !menuRef.current.contains(event.target as Node)) {
-        setIsOpen(false);
-      }
+    const handleScroll = () => { if (isOpen) setIsOpen(false); };
+    window.addEventListener('scroll', handleScroll, true);
+    window.addEventListener('resize', handleScroll);
+    return () => {
+      window.removeEventListener('scroll', handleScroll, true);
+      window.removeEventListener('resize', handleScroll);
     };
-    document.addEventListener('mousedown', handleClickOutside);
-    return () => document.removeEventListener('mousedown', handleClickOutside);
-  }, []);
+  }, [isOpen]);
 
   return (
-    <div className="relative" ref={menuRef}>
+    <>
       <button
-        onClick={(e) => {
-          e.stopPropagation();
-          setIsOpen(!isOpen);
-        }}
+        ref={buttonRef}
+        onClick={toggleMenu}
         className="p-2 hover:bg-neutral-800 rounded-lg text-slate-500 hover:text-slate-300 transition-colors"
       >
         <MoreHorizontal size={20} />
       </button>
 
-      {isOpen && (
-        <div className="absolute right-0 top-full mt-1 bg-neutral-800 border border-neutral-700 rounded-lg shadow-xl z-50 min-w-[140px] overflow-hidden">
-          <button
-            onClick={(e) => {
-              e.stopPropagation();
-              onView();
-              setIsOpen(false);
+      {isOpen && createPortal(
+        <>
+          <div
+            className="fixed inset-0 z-[9998]"
+            onClick={(e) => { e.stopPropagation(); setIsOpen(false); }}
+          />
+          <div
+            className="fixed bg-neutral-800 border border-neutral-700 rounded-lg shadow-xl z-[9999] w-[150px] overflow-hidden"
+            style={{
+              top: coords.top,
+              left: coords.left
             }}
-            className="w-full px-4 py-2.5 text-left text-sm text-slate-300 hover:bg-neutral-700 flex items-center gap-2 transition-colors"
           >
-            <Eye size={16} />
-            Xem
-          </button>
-          <button
-            onClick={(e) => {
-              e.stopPropagation();
-              onEdit();
-              setIsOpen(false);
-            }}
-            className="w-full px-4 py-2.5 text-left text-sm text-slate-300 hover:bg-neutral-700 flex items-center gap-2 transition-colors"
-          >
-            <Edit size={16} />
-            Sửa
-          </button>
-          <button
-            onClick={(e) => {
-              e.stopPropagation();
-              if (window.confirm(`Bạn có chắc chắn muốn xóa "${itemName}"?`)) {
-                onDelete();
-              }
-              setIsOpen(false);
-            }}
-            className="w-full px-4 py-2.5 text-left text-sm text-red-400 hover:bg-red-900/20 flex items-center gap-2 transition-colors"
-          >
-            <Trash2 size={16} />
-            Xóa
-          </button>
-        </div>
+            <button
+              onClick={(e) => {
+                e.stopPropagation();
+                onView();
+                setIsOpen(false);
+              }}
+              className="w-full px-4 py-2.5 text-left text-sm text-slate-300 hover:bg-neutral-700 flex items-center gap-2 transition-colors"
+            >
+              <Eye size={16} />
+              Xem
+            </button>
+            <button
+              onClick={(e) => {
+                e.stopPropagation();
+                onEdit();
+                setIsOpen(false);
+              }}
+              className="w-full px-4 py-2.5 text-left text-sm text-slate-300 hover:bg-neutral-700 flex items-center gap-2 transition-colors"
+            >
+              <Edit size={16} />
+              Sửa
+            </button>
+            <button
+              onClick={(e) => {
+                e.stopPropagation();
+                if (window.confirm(`Bạn có chắc chắn muốn xóa "${itemName}"?`)) {
+                  onDelete();
+                }
+                setIsOpen(false);
+              }}
+              className="w-full px-4 py-2.5 text-left text-sm text-red-400 hover:bg-red-900/20 flex items-center gap-2 transition-colors"
+            >
+              <Trash2 size={16} />
+              Xóa
+            </button>
+          </div>
+        </>,
+        document.body
       )}
-    </div>
+    </>
   );
 };
 
@@ -465,8 +492,8 @@ export const Customers: React.FC = () => {
         </div>
       </div>
 
-      {/* Customers List */}
-      <div className="bg-neutral-900 rounded-xl shadow-lg shadow-black/20 border border-neutral-800 overflow-hidden">
+      {/* Customers List - Table View */}
+      <div className="bg-neutral-900 rounded-xl shadow-lg shadow-black/20 border border-neutral-800 flex flex-col overflow-hidden">
         {/* Filters Header */}
         <div className="p-4 border-b border-neutral-800 flex flex-col sm:flex-row gap-4 justify-between">
           <div className="relative flex-1 max-w-md">
@@ -481,71 +508,75 @@ export const Customers: React.FC = () => {
           </div>
           <div className="flex gap-2 flex-wrap">
             <TableFilter onFilterChange={setFilter} />
-            <button className="flex items-center gap-2 px-3 py-2 border border-neutral-700 bg-neutral-800 text-slate-300 rounded-lg hover:bg-neutral-700 hover:text-white transition-colors">
-              <Filter size={16} />
-              <span>Phân hạng</span>
-            </button>
           </div>
         </div>
 
-        {/* Customers List */}
-        <div className="p-4 space-y-4">
-          {filteredCustomers.length === 0 ? (
-            <div className="p-8 text-center text-slate-500">
-              Không tìm thấy khách hàng nào phù hợp với bộ lọc
-            </div>
-          ) : filteredCustomers.map((customer) => (
-            <div key={customer.id} className="bg-neutral-900 p-4 rounded-xl shadow-lg shadow-black/20 border border-neutral-800 flex gap-6 items-center hover:border-gold-900/30 transition-all">
-              <div className="w-24 h-24 rounded-lg bg-neutral-800 flex items-center justify-center text-slate-400 font-bold text-2xl border border-neutral-700 flex-shrink-0">
-                {customer.name.charAt(0)}
-              </div>
-              <div className="flex-1">
-                <div className="flex justify-between items-start">
-                  <div>
-                    <h3 className="font-bold text-lg text-slate-100">{customer.name}</h3>
-                    <div className="flex items-center gap-3 text-sm mt-1">
-                      <span className="font-mono text-slate-600 text-xs">#{customer.id}</span>
-                      <span className="flex items-center gap-1 text-slate-400"><Phone size={12} /> {customer.phone}</span>
-                      {customer.email && <span className="flex items-center gap-1 text-slate-400"><Mail size={12} /> {customer.email}</span>}
+        {/* Table Content */}
+        <div className="overflow-x-auto min-h-[400px]">
+          <table className="w-full text-left border-collapse">
+            <thead>
+              <tr className="border-b border-neutral-800 text-slate-400 text-xs font-semibold uppercase tracking-wider bg-neutral-800/50">
+                <th className="p-4 min-w-[250px]">Khách hàng</th>
+                <th className="p-4">Hạng</th>
+                <th className="p-4 hidden md:table-cell">Địa chỉ</th>
+                <th className="p-4 text-right">Tổng chi tiêu</th>
+                <th className="p-4 hidden sm:table-cell">Lần cuối</th>
+                <th className="p-4 w-14 sticky right-0 bg-neutral-900/90 backdrop-blur-sm z-10"></th>
+              </tr>
+            </thead>
+            <tbody className="divide-y divide-neutral-800">
+              {filteredCustomers.length === 0 ? (
+                <tr>
+                  <td colSpan={6} className="p-8 text-center text-slate-500">
+                    Không tìm thấy khách hàng nào phù hợp
+                  </td>
+                </tr>
+              ) : filteredCustomers.map((customer) => (
+                <tr key={customer.id} className="hover:bg-neutral-800/50 transition-colors group">
+                  <td className="p-4">
+                    <div className="flex items-center gap-3">
+                      <div className="w-10 h-10 rounded-full bg-neutral-800 flex items-center justify-center text-slate-400 font-bold border border-neutral-700 text-sm">
+                        {customer.name.charAt(0).toUpperCase()}
+                      </div>
+                      <div>
+                        <div className="font-bold text-slate-200 block">{customer.name}</div>
+                        <div className="flex items-center gap-2 text-xs text-slate-500 font-mono mt-0.5">
+                          <span>{customer.phone}</span>
+                          {customer.email && <span className="hidden lg:inline">• {customer.email}</span>}
+                        </div>
+                      </div>
                     </div>
-                  </div>
-                  <ActionMenu
-                    itemName={customer.name}
-                    onView={() => alert(`Xem chi tiết khách hàng: ${customer.name}\n\nID: ${customer.id}\nHạng: ${customer.tier}\nSĐT: ${customer.phone}\nEmail: ${customer.email || 'N/A'}\nĐịa chỉ: ${customer.address || 'Chưa có'}\nTổng chi tiêu: ${customer.totalSpent.toLocaleString()} ₫\nLần cuối: ${customer.lastVisit || 'Chưa có'}\nGhi chú: ${customer.notes || 'Không có'}`)}
-                    onEdit={() => {
-                      setEditingCustomer({ ...customer });
-                      setShowEditModal(true);
-                    }}
-                    onDelete={() => handleDeleteCustomer(customer.id)}
-                  />
-                </div>
-
-                <div className="mt-4 flex items-center justify-between">
-                  <div className="flex items-center gap-4">
-                    <span className={`inline-flex items-center gap-1 px-2.5 py-1 rounded-full text-xs font-bold border shadow-sm ${getTierColor(customer.tier)}`}>
+                  </td>
+                  <td className="p-4">
+                    <span className={`inline-flex items-center gap-1 px-2.5 py-1 rounded-full text-xs font-bold border ${getTierColor(customer.tier)}`}>
                       {customer.tier === 'VVIP' && <Star size={10} fill="currentColor" />}
                       {customer.tier}
                     </span>
-                    <div className="text-sm text-slate-400">
-                      Lần cuối: <span className="text-slate-300">{customer.lastVisit || 'N/A'}</span>
-                    </div>
-                    {customer.address && (
-                      <div className="text-xs text-slate-500 flex items-center gap-1">
-                        <MapPin size={12} />
-                        <span className="truncate max-w-[200px]">{customer.address}</span>
-                      </div>
-                    )}
-                  </div>
-                  <div className="text-right">
-                    <div className="font-bold text-lg text-gold-500">{customer.totalSpent.toLocaleString()} ₫</div>
-                    {customer.totalSpent > 50000000 && (
-                      <div className="text-[10px] text-gold-500 font-medium">Top spender</div>
-                    )}
-                  </div>
-                </div>
-              </div>
-            </div>
-          ))}
+                  </td>
+                  <td className="p-4 text-sm text-slate-400 hidden md:table-cell max-w-[200px] truncate">
+                    {customer.address || '-'}
+                  </td>
+                  <td className="p-4 text-right">
+                    <div className="font-bold text-slate-200">{customer.totalSpent.toLocaleString()} ₫</div>
+                  </td>
+                  <td className="p-4 text-sm text-slate-400 hidden sm:table-cell">
+                    {customer.lastVisit || '-'}
+                  </td>
+                  <td className="p-4 text-right sticky right-0 bg-neutral-900/90 backdrop-blur-sm group-hover:bg-neutral-800 transition-colors z-10">
+                    <ActionMenu
+                      itemName={customer.name}
+                      onView={() => alert(`Xem chi tiết khách hàng: ${customer.name}\n\nID: ${customer.id}\nHạng: ${customer.tier}\nSĐT: ${customer.phone}\nEmail: ${customer.email || 'N/A'}\nĐịa chỉ: ${customer.address || 'Chưa có'}\nTổng chi tiêu: ${customer.totalSpent.toLocaleString()} ₫\nLần cuối: ${customer.lastVisit || 'Chưa có'}\nGhi chú: ${customer.notes || 'Không có'}`)}
+                      onEdit={() => {
+                        setEditingCustomer({ ...customer });
+                        setShowEditModal(true);
+                      }}
+                      onDelete={() => handleDeleteCustomer(customer.id)}
+                    />
+                  </td>
+                </tr>
+              ))}
+            </tbody>
+          </table>
         </div>
       </div>
     </div>
