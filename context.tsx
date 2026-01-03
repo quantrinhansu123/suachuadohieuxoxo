@@ -1,21 +1,25 @@
 import React, { createContext, useContext, useState, useEffect, ReactNode } from 'react';
 import { ref, onValue, set, update, push, get, remove } from 'firebase/database';
 import { db, DB_PATHS } from './firebase';
-import { 
-  Order, 
-  InventoryItem, 
-  ServiceItem, 
-  WorkflowDefinition, 
+import {
+  Order,
+  InventoryItem,
+  ServiceItem,
+  WorkflowDefinition,
   ServiceType,
   TechnicalLog,
   Member,
-  Product
+  Product,
+  Customer
 } from './types';
 import { MOCK_WORKFLOWS, SERVICE_CATALOG } from './constants';
 
 interface AppContextType {
   orders: Order[];
   inventory: InventoryItem[];
+  members: Member[];
+  products: Product[];
+  customers: Customer[];
   addOrder: (newOrder: Order) => void;
   updateOrder: (orderId: string, updatedOrder: Order) => Promise<void>;
   deleteOrder: (orderId: string) => Promise<void>;
@@ -32,6 +36,9 @@ interface AppContextType {
   deleteProduct: (productId: string) => Promise<void>;
   addProduct: (newProduct: Product) => Promise<void>;
   addTechnicianNote: (orderId: string, itemId: string, content: string, user: string) => void;
+  addCustomer: (newCustomer: Customer) => Promise<void>;
+  updateCustomer: (customerId: string, updatedCustomer: Customer) => Promise<void>;
+  deleteCustomer: (customerId: string) => Promise<void>;
   isLoading: boolean;
 }
 
@@ -40,6 +47,9 @@ const AppContext = createContext<AppContextType | undefined>(undefined);
 export const AppProvider: React.FC<{ children: ReactNode }> = ({ children }) => {
   const [orders, setOrders] = useState<Order[]>([]);
   const [inventory, setInventory] = useState<InventoryItem[]>([]);
+  const [members, setMembers] = useState<Member[]>([]);
+  const [products, setProducts] = useState<Product[]>([]);
+  const [customers, setCustomers] = useState<Customer[]>([]);
   const [isLoading, setIsLoading] = useState(true);
 
   // Helper function để chuyển đổi từ tiếng Việt sang tiếng Anh
@@ -60,6 +70,7 @@ export const AppProvider: React.FC<{ children: ReactNode }> = ({ children }) => 
         afterImage: item.anh_sau || item.afterImage,
         isProduct: item.isProduct,
         serviceId: item.serviceId,
+        workflowId: item.workflowId,
         history: item.history,
         lastUpdated: item.lastUpdated,
         technicalLog: item.technicalLog
@@ -86,6 +97,46 @@ export const AppProvider: React.FC<{ children: ReactNode }> = ({ children }) => 
       supplier: vnItem.nha_cung_cap || vnItem.supplier,
       lastImport: vnItem.ngay_nhap_gan_nhat || vnItem.lastImport,
       image: vnItem.hinh_anh || vnItem.image
+    };
+  };
+
+  const mapVietnameseMemberToEnglish = (vnItem: any): Member => {
+    return {
+      id: vnItem.ma_nhan_vien || vnItem.id,
+      name: vnItem.ho_ten || vnItem.name,
+      role: vnItem.chuc_vu || vnItem.role,
+      phone: vnItem.so_dien_thoai || vnItem.phone,
+      email: vnItem.email || '',
+      status: vnItem.trang_thai || vnItem.status,
+      avatar: vnItem.anh_dai_dien || vnItem.avatar,
+      specialty: vnItem.chuyen_mon || vnItem.specialty,
+      department: vnItem.phong_ban || vnItem.department
+    };
+  };
+
+  const mapVietnameseProductToEnglish = (vnItem: any): Product => {
+    return {
+      id: vnItem.ma_san_pham || vnItem.id,
+      name: vnItem.ten_san_pham || vnItem.name,
+      category: vnItem.danh_muc || vnItem.category,
+      price: vnItem.gia_ban || vnItem.price,
+      stock: vnItem.ton_kho || vnItem.stock,
+      image: vnItem.hinh_anh || vnItem.image,
+      desc: vnItem.mo_ta || vnItem.desc
+    };
+  };
+
+  const mapVietnameseCustomerToEnglish = (vnItem: any): Customer => {
+    return {
+      id: vnItem.ma_khach_hang || vnItem.id,
+      name: vnItem.ho_ten || vnItem.name,
+      phone: vnItem.so_dien_thoai || vnItem.phone,
+      email: vnItem.email || '',
+      address: vnItem.dia_chi || vnItem.address,
+      tier: vnItem.hang_khach || vnItem.tier || 'Standard',
+      totalSpent: vnItem.tong_chi_tieu || vnItem.totalSpent || 0,
+      lastVisit: vnItem.lan_ghe_gan_nhat || vnItem.lastVisit || '',
+      notes: vnItem.ghi_chu || vnItem.notes
     };
   };
 
@@ -122,19 +173,69 @@ export const AppProvider: React.FC<{ children: ReactNode }> = ({ children }) => 
       }
     });
 
+    // Lắng nghe Nhân sự
+    const membersRef = ref(db, DB_PATHS.MEMBERS);
+    const unsubMembers = onValue(membersRef, (snapshot) => {
+      const data = snapshot.val();
+      if (data) {
+        setMembers(Object.values(data).map(mapVietnameseMemberToEnglish));
+      } else {
+        setMembers([]);
+      }
+    });
+
+    // Lắng nghe Sản phẩm
+    const productsRef = ref(db, DB_PATHS.PRODUCTS);
+    const unsubProducts = onValue(productsRef, (snapshot) => {
+      const data = snapshot.val();
+      if (data) {
+        setProducts(Object.values(data).map(mapVietnameseProductToEnglish));
+      } else {
+        setProducts([]);
+      }
+    });
+
+    // Lắng nghe Khách hàng
+    const customersRef = ref(db, DB_PATHS.CUSTOMERS);
+    const unsubCustomers = onValue(customersRef, (snapshot) => {
+      const data = snapshot.val();
+      if (data) {
+        setCustomers(Object.values(data).map(mapVietnameseCustomerToEnglish));
+      } else {
+        setCustomers([]);
+      }
+    });
+
     setIsLoading(false);
 
     // Cleanup listeners
     return () => {
       unsubOrders();
       unsubInventory();
+      unsubMembers();
+      unsubProducts();
+      unsubCustomers();
     };
   }, []);
 
   // --- 2. Thêm Đơn Hàng & Trừ Kho ---
   const addOrder = async (newOrder: Order) => {
+    console.log('💾 Saving order to Firebase:', {
+      orderId: newOrder.id,
+      items: newOrder.items.map(item => ({
+        id: item.id,
+        name: item.name,
+        serviceId: item.serviceId,
+        workflowId: item.workflowId,
+        status: item.status
+      }))
+    });
+
+    // Remove undefined values before saving to Firebase
+    const cleanedOrder = removeUndefined(newOrder);
+
     // Lưu đơn hàng vào Firebase với Key là ID của đơn
-    await set(ref(db, `${DB_PATHS.ORDERS}/${newOrder.id}`), newOrder);
+    await set(ref(db, `${DB_PATHS.ORDERS}/${newOrder.id}`), cleanedOrder);
 
     // Tính toán trừ kho
     const currentInventory = [...inventory];
@@ -151,7 +252,7 @@ export const AppProvider: React.FC<{ children: ReactNode }> = ({ children }) => 
               if (invItem) {
                 const deductAmount = mat.quantity * item.quantity;
                 invItem.quantity = Math.max(0, invItem.quantity - deductAmount);
-                
+
                 // Cập nhật trực tiếp item trong kho lên Firebase
                 update(ref(db, `${DB_PATHS.INVENTORY}/${invItem.id}`), {
                   quantity: invItem.quantity
@@ -210,7 +311,7 @@ export const AppProvider: React.FC<{ children: ReactNode }> = ({ children }) => 
           quantity: item.quantity || 1,
           status: item.status
         };
-        
+
         // Chỉ thêm optional fields nếu có giá trị
         if (item.beforeImage) cleaned.beforeImage = item.beforeImage;
         if (item.afterImage) cleaned.afterImage = item.afterImage;
@@ -220,13 +321,13 @@ export const AppProvider: React.FC<{ children: ReactNode }> = ({ children }) => 
         if (item.history && item.history.length > 0) cleaned.history = item.history;
         if (item.lastUpdated) cleaned.lastUpdated = item.lastUpdated;
         if (item.technicalLog && item.technicalLog.length > 0) cleaned.technicalLog = item.technicalLog;
-        
+
         return cleaned;
       });
-    
+
     // Tính lại tổng tiền
     const newTotalAmount = updatedItems.reduce((acc, item) => acc + item.price, 0);
-    
+
     // Cập nhật order và làm sạch undefined
     const updatedOrder: any = {
       id: order.id,
@@ -240,7 +341,7 @@ export const AppProvider: React.FC<{ children: ReactNode }> = ({ children }) => 
       expectedDelivery: order.expectedDelivery,
       notes: order.notes || ''
     };
-    
+
     // Loại bỏ tất cả undefined trước khi lưu
     const cleanedOrder = removeUndefined(updatedOrder);
     await set(ref(db, `${DB_PATHS.ORDERS}/${orderId}`), cleanedOrder);
@@ -257,21 +358,21 @@ export const AppProvider: React.FC<{ children: ReactNode }> = ({ children }) => 
 
     const item = order.items[itemIndex];
     const now = Date.now();
-    
+
     // Xử lý lịch sử (History)
     const currentHistory = item.history || [];
     let newHistory = [...currentHistory];
-    
+
     // Đóng stage cũ
     if (newHistory.length > 0) {
       const lastEntryIndex = newHistory.length - 1;
       const lastEntry = newHistory[lastEntryIndex];
       if (!lastEntry.leftAt) {
-         newHistory[lastEntryIndex] = {
-           ...lastEntry,
-           leftAt: now,
-           duration: now - lastEntry.enteredAt
-         };
+        newHistory[lastEntryIndex] = {
+          ...lastEntry,
+          leftAt: now,
+          duration: now - lastEntry.enteredAt
+        };
       }
     }
 
@@ -286,13 +387,13 @@ export const AppProvider: React.FC<{ children: ReactNode }> = ({ children }) => 
     // Xử lý Log (Ghi chú)
     let newLog = item.technicalLog ? [...item.technicalLog] : [];
     if (note) {
-       newLog.push({
-         id: Date.now().toString(),
-         content: note,
-         author: user,
-         timestamp: new Date().toLocaleString('vi-VN'),
-         stage: newStatus
-       });
+      newLog.push({
+        id: Date.now().toString(),
+        content: note,
+        author: user,
+        timestamp: new Date().toLocaleString('vi-VN'),
+        stage: newStatus
+      });
     }
 
     // Cập nhật lên Firebase (chỉ cập nhật các trường thay đổi của item cụ thể)
@@ -302,9 +403,6 @@ export const AppProvider: React.FC<{ children: ReactNode }> = ({ children }) => 
     updates[`${DB_PATHS.ORDERS}/${orderId}/items/${itemIndex}/lastUpdated`] = now;
     updates[`${DB_PATHS.ORDERS}/${orderId}/items/${itemIndex}/technicalLog`] = newLog;
 
-    // Nếu tất cả item đều xong -> Cập nhật trạng thái đơn hàng (Optional logic)
-    // Ở đây ta chỉ cập nhật item
-    
     await update(ref(db), updates);
   };
 
@@ -388,8 +486,27 @@ export const AppProvider: React.FC<{ children: ReactNode }> = ({ children }) => 
     await set(ref(db, `${DB_PATHS.PRODUCTS}/${newProduct.id}`), newProduct);
   };
 
+  // Khách hàng
+  const addCustomer = async (newCustomer: Customer) => {
+    await set(ref(db, `${DB_PATHS.CUSTOMERS}/${newCustomer.id}`), newCustomer);
+  };
+  const updateCustomer = async (customerId: string, updatedCustomer: Customer) => {
+    await set(ref(db, `${DB_PATHS.CUSTOMERS}/${customerId}`), updatedCustomer);
+  };
+  const deleteCustomer = async (customerId: string) => {
+    await remove(ref(db, `${DB_PATHS.CUSTOMERS}/${customerId}`));
+  };
+
   return (
-    <AppContext.Provider value={{ orders, inventory, addOrder, updateOrder, deleteOrder, deleteOrderItem, updateOrderItemStatus, updateInventory, updateInventoryItem, deleteInventoryItem, addInventoryItem, updateMember, deleteMember, addMember, updateProduct, deleteProduct, addProduct, addTechnicianNote, isLoading }}>
+    <AppContext.Provider value={{
+      orders, inventory, members, products, customers,
+      addOrder, updateOrder, deleteOrder, deleteOrderItem, updateOrderItemStatus,
+      updateInventory, updateInventoryItem, deleteInventoryItem, addInventoryItem,
+      updateMember, deleteMember, addMember,
+      updateProduct, deleteProduct, addProduct,
+      addCustomer, updateCustomer, deleteCustomer,
+      addTechnicianNote, isLoading
+    }}>
       {children}
     </AppContext.Provider>
   );

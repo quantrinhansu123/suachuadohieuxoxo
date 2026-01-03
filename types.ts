@@ -52,13 +52,15 @@ export interface ServiceItem {
   type: ServiceType;
   price: number;
   quantity: number;
-  status: 'In Queue' | 'Cleaning' | 'Repairing' | 'QC' | 'Ready' | 'Done';
+  status: string;
   technicianId?: string;
   beforeImage?: string;
+
   afterImage?: string;
   isProduct?: boolean;
   // New fields for tracking
   serviceId?: string; // Link back to Service Catalog ID to find Workflow
+  workflowId?: string; // Specific ID of the workflow this item is following
   history?: TaskHistory[];
   lastUpdated?: number;
   technicalLog?: TechnicalLog[]; // Added for persistent notes between stages
@@ -167,11 +169,12 @@ export interface ServiceCatalogItem {
   name: string;
   category: string;
   categoryPath?: string[]; // Đường dẫn category từ cấp 1 đến cấp 4
-  tier?: '1' | '2' | '3' | '4'; // Service tier/level
+
   price: number;
   desc: string;
   image: string;
   workflowId: string | string[]; // Có thể là một hoặc nhiều quy trình
+  workflows?: { id: string; order: number }[]; // Cấu trúc mới có thứ tự
 }
 
 export interface Product {

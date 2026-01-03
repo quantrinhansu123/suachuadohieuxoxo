@@ -1,10 +1,11 @@
 import React, { useState, useMemo, useEffect } from 'react';
 import { MOCK_MEMBERS, MOCK_WORKFLOWS } from '../constants';
-import { ServiceItem, ServiceType, WorkflowDefinition } from '../types';
-import { useAppStore } from '../context'; 
+import { ServiceItem, ServiceType, WorkflowDefinition, WorkflowStage, ServiceCatalogItem } from '../types';
+import { useAppStore } from '../context';
 import { MoreHorizontal, Calendar, User, Columns, Layers, ChevronRight, Briefcase, XCircle, AlertTriangle, RotateCcw, History, Clock, Info } from 'lucide-react';
-import { ref, get, onValue } from 'firebase/database';
+import { ref, get, onValue, set, update } from 'firebase/database';
 import { db, DB_PATHS } from '../firebase';
+import { EditStageTasksModal } from './EditStageTasksModal';
 
 interface KanbanItem extends ServiceItem {
   orderId: string;
@@ -33,12 +34,53 @@ const DEFAULT_COLUMNS = [
   { id: 'QC', title: 'Kiểm Tra (QC)', color: 'bg-purple-900/10', dot: 'bg-purple-500' },
   { id: 'Ready', title: 'Hoàn Thành', color: 'bg-emerald-900/10', dot: 'bg-emerald-500' },
 ];
+// Fallback user since MOCK_MEMBERS is now empty
+const CURRENT_USER = MOCK_MEMBERS[0] || {
+  id: 'system',
+  name: 'Hệ thống',
+  role: 'Quản lý' as const,
+  phone: '',
+  email: '',
+  status: 'Active' as const
+};
 
-const CURRENT_USER = MOCK_MEMBERS[0]; 
+// Helper to remove undefined values before saving to Firebase
+const removeUndefined = (obj: any): any => {
+  if (obj === null || obj === undefined) return null;
+  if (Array.isArray(obj)) {
+    return obj.map(item => removeUndefined(item));
+  }
+  if (typeof obj === 'object') {
+    const cleaned: any = {};
+    for (const key in obj) {
+      if (obj[key] !== undefined) {
+        cleaned[key] = removeUndefined(obj[key]);
+      }
+    }
+    return cleaned;
+  }
+  return obj;
+};
 
 export const KanbanBoard: React.FC = () => {
-  const { orders, updateOrderItemStatus } = useAppStore();
-  const [workflows, setWorkflows] = useState<WorkflowDefinition[]>(MOCK_WORKFLOWS);
+  const { orders, updateOrderItemStatus, updateOrder } = useAppStore();
+  const [workflows, setWorkflows] = useState<WorkflowDefinition[]>([]);
+  const [services, setServices] = useState<ServiceCatalogItem[]>([]);
+
+  // Load services for workflow sequence lookup
+  useEffect(() => {
+    const servicesRef = ref(db, DB_PATHS.SERVICES);
+    const unsubscribe = onValue(servicesRef, (snapshot) => {
+      if (snapshot.exists()) {
+        const data = snapshot.val();
+        const list = Object.keys(data).map(key => ({ ...data[key], id: key } as ServiceCatalogItem));
+        setServices(list);
+      } else {
+        setServices([]);
+      }
+    });
+    return () => unsubscribe();
+  }, []);
 
   // Load workflows from Firebase
   useEffect(() => {
@@ -63,11 +105,11 @@ export const KanbanBoard: React.FC = () => {
           });
           setWorkflows(workflowsList);
         } else {
-          setWorkflows(MOCK_WORKFLOWS);
+          setWorkflows([]);
         }
       } catch (error) {
         console.error('Error loading workflows:', error);
-        setWorkflows(MOCK_WORKFLOWS);
+        setWorkflows([]);
       }
     };
 
@@ -95,11 +137,11 @@ export const KanbanBoard: React.FC = () => {
           });
           setWorkflows(workflowsList);
         } else {
-          setWorkflows(MOCK_WORKFLOWS);
+          setWorkflows([]);
         }
       } catch (error) {
         console.error('Error in real-time listener:', error);
-        setWorkflows(MOCK_WORKFLOWS);
+        setWorkflows([]);
       }
     });
 
@@ -109,7 +151,7 @@ export const KanbanBoard: React.FC = () => {
   const WORKFLOWS_FILTER = useMemo(() => [
     { id: 'ALL', label: 'Tất cả công việc', types: [] as ServiceType[], color: 'bg-neutral-800 text-slate-400' },
     ...workflows
-  ], [workflows]); 
+  ], [workflows]);
 
   // Helper to map old status to new stage IDs - must be defined before useMemo that uses it
   const mapStatusToStageId = (status: string): string => {
@@ -125,7 +167,7 @@ export const KanbanBoard: React.FC = () => {
   };
 
   const items: KanbanItem[] = useMemo(() => {
-    const allItems = orders.flatMap(order => 
+    const allItems = orders.flatMap(order =>
       order.items
         .filter(item => !item.isProduct)
         .map(item => ({
@@ -135,13 +177,13 @@ export const KanbanBoard: React.FC = () => {
           expectedDelivery: order.expectedDelivery
         }))
     );
-    
+
     console.log('Kanban items:', {
       totalOrders: orders.length,
       totalItems: allItems.length,
       items: allItems.map(i => ({ id: i.id, name: i.name, status: i.status, type: i.type }))
     });
-    
+
     return allItems;
   }, [orders]);
 
@@ -150,49 +192,79 @@ export const KanbanBoard: React.FC = () => {
   const [logs, setLogs] = useState<ActivityLog[]>([]);
   const [showHistory, setShowHistory] = useState(false);
   const [selectedItem, setSelectedItem] = useState<KanbanItem | null>(null);
+  const [editingStage, setEditingStage] = useState<{ stageId: string; stageName: string } | null>(null);
 
   // Get columns from active workflow
   const columns = useMemo(() => {
+    let workflowColumns: any[] = [];
+
     if (activeWorkflow === 'ALL') {
       // Get all unique stages from all workflows
       const allStages = workflows.flatMap(wf => wf.stages || []);
       const uniqueStages = Array.from(
         new Map(allStages.map(s => [s.id, s])).values()
-      ).sort((a, b) => a.order - b.order);
-      
+      ).sort((a: WorkflowStage, b: WorkflowStage) => a.order - b.order) as WorkflowStage[];
+
       if (uniqueStages.length > 0) {
-        return uniqueStages.map(stage => ({
+        workflowColumns = uniqueStages.map(stage => ({
           id: stage.id,
           title: stage.name,
           color: stage.color ? stage.color.replace('-500', '-900/10') : 'bg-neutral-900',
-          dot: stage.color || 'bg-slate-500'
+          dot: stage.color || 'bg-slate-500',
+          isSpecial: false
+        }));
+      } else {
+        // Fallback: map default columns to stage format
+        workflowColumns = DEFAULT_COLUMNS.map(col => ({
+          id: mapStatusToStageId(col.id),
+          title: col.title,
+          color: col.color,
+          dot: col.dot,
+          isSpecial: false
         }));
       }
-      // Fallback: map default columns to stage format
-      return DEFAULT_COLUMNS.map(col => ({
-        id: mapStatusToStageId(col.id),
-        title: col.title,
-        color: col.color,
-        dot: col.dot
-      }));
     } else {
       const workflow = workflows.find(wf => wf.id === activeWorkflow);
       if (workflow?.stages && workflow.stages.length > 0) {
-        return workflow.stages.sort((a, b) => a.order - b.order).map(stage => ({
+        workflowColumns = workflow.stages.sort((a, b) => a.order - b.order).map(stage => ({
           id: stage.id,
           title: stage.name,
           color: stage.color ? stage.color.replace('-500', '-900/10') : 'bg-neutral-900',
-          dot: stage.color || 'bg-slate-500'
+          dot: stage.color || 'bg-slate-500',
+          isSpecial: false
+        }));
+      } else {
+        // Fallback: map default columns to stage format
+        workflowColumns = DEFAULT_COLUMNS.map(col => ({
+          id: mapStatusToStageId(col.id),
+          title: col.title,
+          color: col.color,
+          dot: col.dot,
+          isSpecial: false
         }));
       }
-      // Fallback: map default columns to stage format
-      return DEFAULT_COLUMNS.map(col => ({
-        id: mapStatusToStageId(col.id),
-        title: col.title,
-        color: col.color,
-        dot: col.dot
-      }));
     }
+
+    // Always add Done and Cancel columns at the end
+    return [
+      ...workflowColumns,
+      {
+        id: 'done',
+        title: 'Done',
+        color: 'bg-emerald-900/10',
+        dot: 'bg-emerald-500',
+        isSpecial: true,
+        specialType: 'done'
+      },
+      {
+        id: 'cancel',
+        title: 'Cancel',
+        color: 'bg-red-900/10',
+        dot: 'bg-red-500',
+        isSpecial: true,
+        specialType: 'cancel'
+      }
+    ];
   }, [activeWorkflow, workflows]);
 
   const [modalConfig, setModalConfig] = useState<{
@@ -200,6 +272,7 @@ export const KanbanBoard: React.FC = () => {
     type: 'CANCEL' | 'BACKWARD' | null;
     item: KanbanItem | null;
     targetStatus?: string;
+    previousWorkflow?: { workflow: WorkflowDefinition; stage: WorkflowStage };
   }>({ isOpen: false, type: null, item: null });
   const [reasonInput, setReasonInput] = useState('');
 
@@ -220,6 +293,7 @@ export const KanbanBoard: React.FC = () => {
   const handleDragStart = (e: React.DragEvent<HTMLDivElement>, item: KanbanItem) => {
     setDraggedItem(item);
     e.dataTransfer.effectAllowed = 'move';
+    e.dataTransfer.setData('text/plain', item.id); // Required for drag to work in some browsers
   };
 
   const handleDragOver = (e: React.DragEvent<HTMLDivElement>) => {
@@ -227,25 +301,241 @@ export const KanbanBoard: React.FC = () => {
     e.dataTransfer.dropEffect = 'move';
   };
 
-  const handleDrop = (e: React.DragEvent<HTMLDivElement>, statusId: string) => {
+  const handleDrop = async (e: React.DragEvent<HTMLDivElement>, statusId: string) => {
     e.preventDefault();
     if (!draggedItem) return;
-    
+
     if (draggedItem.status === statusId) {
-        setDraggedItem(null);
-        return;
+      setDraggedItem(null);
+      return;
     }
 
     const validStatus = columns.find(c => c.id === statusId);
     if (!validStatus) return;
 
-    const oldIndex = columns.findIndex(c => c.id === draggedItem.status);
-    const newIndex = columns.findIndex(c => c.id === statusId);
-
     const oldStatusTitle = columns.find(c => c.id === draggedItem.status)?.title;
     const newStatusTitle = validStatus.title;
 
-    if (newIndex < oldIndex) {
+    // Handle special columns
+    if (statusId === 'done') {
+      console.log('🎯 Done column detected, checking for next workflow...');
+      let movedToNextWorkflow = false;
+
+      // Check for Next Workflow
+      console.log('📋 Item info:', {
+        serviceId: draggedItem.serviceId,
+        workflowId: draggedItem.workflowId,
+        itemName: draggedItem.name,
+        FULL_ITEM: draggedItem
+      });
+
+      if (draggedItem.serviceId && draggedItem.workflowId) {
+        const service = services.find(s => s.id === draggedItem.serviceId);
+        console.log('🔍 Found service:', service ? {
+          id: service.id,
+          name: service.name,
+          workflows: service.workflows
+        } : 'NOT FOUND');
+
+        // Ensure service exists and has workflows config
+        if (service && service.workflows && service.workflows.length > 0) {
+          // Find current workflow index
+          const currentWfIndex = service.workflows.findIndex(wf => wf.id === draggedItem.workflowId);
+          console.log('📊 Workflow index:', {
+            currentWfIndex,
+            totalWorkflows: service.workflows.length,
+            currentWorkflowId: draggedItem.workflowId,
+            allWorkflowIds: service.workflows.map(w => w.id)
+          });
+
+          if (currentWfIndex !== -1 && currentWfIndex < service.workflows.length - 1) {
+            // Determine next workflow
+            const nextWfConfig = service.workflows[currentWfIndex + 1];
+            const nextWf = workflows.find(w => w.id === nextWfConfig.id);
+            console.log('➡️ Next workflow:', nextWf ? {
+              id: nextWf.id,
+              label: nextWf.label,
+              stagesCount: nextWf.stages?.length || 0
+            } : 'NOT FOUND');
+
+            if (nextWf && nextWf.stages && nextWf.stages.length > 0) {
+              // Find first stage of next workflow
+              const sortedStages = [...nextWf.stages].sort((a, b) => a.order - b.order);
+              const firstStage = sortedStages[0];
+              console.log('🎬 First stage of next workflow:', firstStage);
+
+              // Perform Update
+              const order = orders.find(o => o.id === draggedItem.orderId);
+              if (order) {
+                const now = Date.now();
+                const updatedItems = order.items.map(item => {
+                  if (item.id === draggedItem.id) {
+                    // Close history
+                    const newHistory = [...(item.history || [])];
+                    if (newHistory.length > 0) {
+                      const lastEntry = newHistory[newHistory.length - 1];
+                      if (!lastEntry.leftAt) {
+                        newHistory[newHistory.length - 1] = {
+                          ...lastEntry,
+                          leftAt: now,
+                          duration: now - lastEntry.enteredAt
+                        };
+                      }
+                    }
+                    // Open new history
+                    newHistory.push({
+                      stageId: firstStage.id,
+                      stageName: firstStage.name,
+                      enteredAt: now,
+                      performedBy: CURRENT_USER.name
+                    });
+
+                    return {
+                      ...item,
+                      workflowId: nextWf.id,
+                      status: firstStage.id,
+                      history: newHistory,
+                      lastUpdated: now
+                    };
+                  }
+                  return item;
+                });
+
+                console.log('💾 Updating order with new workflow...');
+                const cleanedOrder = removeUndefined({ ...order, items: updatedItems });
+                await updateOrder(order.id, cleanedOrder);
+                addVisualLog('Chuyển quy trình', draggedItem.name, `Chuyển sang quy trình: ${nextWf.label} (Bước: ${firstStage.name})`, 'info');
+                movedToNextWorkflow = true;
+                console.log('✅ Successfully moved to next workflow!');
+              }
+            } else {
+              console.log('❌ Next workflow has no stages');
+              alert('Quy trình tiếp theo chưa được cấu hình các bước!');
+            }
+          } else {
+            console.log('ℹ️ No next workflow (last workflow or not found)');
+          }
+        } else {
+          console.log('⚠️ Service has no workflows configured');
+        }
+      } else {
+        console.log('⚠️ Item missing serviceId or workflowId');
+      }
+
+      if (!movedToNextWorkflow) {
+        console.log('🏁 Marking as done (no next workflow)');
+        // No next workflow -> Mark as Done
+        updateOrderItemStatus(draggedItem.orderId, draggedItem.id, 'done', CURRENT_USER.name);
+        addVisualLog('Hoàn thành', draggedItem.name, `Đã hoàn thành toàn bộ quy trình`, 'info');
+      }
+
+      setDraggedItem(null);
+      return;
+    }
+
+    if (statusId === 'cancel') {
+      console.log('🚫 Cancel column detected, checking for previous workflow...');
+      let movedToPreviousWorkflow = false;
+
+      // Check for Previous Workflow
+      console.log('📋 Item info for cancel:', {
+        serviceId: draggedItem.serviceId,
+        workflowId: draggedItem.workflowId,
+        itemName: draggedItem.name
+      });
+
+      if (draggedItem.serviceId && draggedItem.workflowId) {
+        const service = services.find(s => s.id === draggedItem.serviceId);
+        console.log('🔍 Found service:', service ? {
+          id: service.id,
+          name: service.name,
+          workflows: service.workflows
+        } : 'NOT FOUND');
+
+        if (service && service.workflows && service.workflows.length > 0) {
+          const currentWfIndex = service.workflows.findIndex(wf => wf.id === draggedItem.workflowId);
+          console.log('📊 Current workflow index:', {
+            currentWfIndex,
+            totalWorkflows: service.workflows.length
+          });
+
+          // Check if there's a previous workflow (index > 0)
+          if (currentWfIndex > 0) {
+            const prevWfConfig = service.workflows[currentWfIndex - 1];
+            const prevWf = workflows.find(w => w.id === prevWfConfig.id);
+            console.log('⬅️ Previous workflow:', prevWf ? {
+              id: prevWf.id,
+              label: prevWf.label,
+              stagesCount: prevWf.stages?.length || 0
+            } : 'NOT FOUND');
+
+            if (prevWf && prevWf.stages && prevWf.stages.length > 0) {
+              // Find LAST stage of previous workflow
+              const sortedStages = [...prevWf.stages].sort((a, b) => a.order - b.order);
+              const lastStage = sortedStages[sortedStages.length - 1];
+              console.log('🎬 Last stage of previous workflow:', lastStage);
+
+              // Show modal to get reason
+              setModalConfig({
+                isOpen: true,
+                type: 'CANCEL',
+                item: draggedItem,
+                targetStatus: 'previous_workflow',
+                previousWorkflow: { workflow: prevWf, stage: lastStage }
+              });
+              setDraggedItem(null);
+              return;
+            } else {
+              alert('Quy trình trước chưa được cấu hình các bước!');
+            }
+          } else {
+            console.log('ℹ️ No previous workflow (first workflow)');
+            alert('Đây là quy trình đầu tiên, không thể quay lại quy trình trước!');
+          }
+        } else {
+          console.log('⚠️ Service has no workflows configured');
+        }
+      } else {
+        console.log('⚠️ Item missing serviceId or workflowId');
+      }
+
+      // If no previous workflow, just show cancel modal
+      if (!movedToPreviousWorkflow) {
+        setModalConfig({
+          isOpen: true,
+          type: 'CANCEL',
+          item: draggedItem,
+          targetStatus: statusId
+        });
+      }
+
+      setDraggedItem(null);
+      return;
+    }
+
+    // Normal column logic
+    const currentStageId = mapStatusToStageId(draggedItem.status);
+    const oldIndex = columns.findIndex(c => c.id === currentStageId);
+    const newIndex = columns.findIndex(c => c.id === statusId);
+
+    console.log('🔍 Drag Debug:', {
+      draggedItemStatus: draggedItem.status,
+      mappedCurrentStageId: currentStageId,
+      targetStatusId: statusId,
+      oldIndex,
+      newIndex,
+      columnsIds: columns.map(c => c.id)
+    });
+
+    // If oldIndex is -1, the item's current status doesn't match any column
+    // This can happen with legacy data or items from different workflows
+    // In this case, allow the move (treat as forward move)
+    if (oldIndex === -1) {
+      console.log('⚠️ Current status not found in columns, allowing move');
+      updateOrderItemStatus(draggedItem.orderId, draggedItem.id, statusId, CURRENT_USER.name);
+      addVisualLog('Cập nhật tiến độ', draggedItem.name, `Chuyển sang [${newStatusTitle}]`, 'info');
+    } else if (newIndex < oldIndex) {
+      console.log('⬅️ Backward move detected, showing modal');
       setModalConfig({
         isOpen: true,
         type: 'BACKWARD',
@@ -253,10 +543,11 @@ export const KanbanBoard: React.FC = () => {
         targetStatus: statusId
       });
     } else {
+      console.log('➡️ Forward move, calling updateOrderItemStatus');
       updateOrderItemStatus(draggedItem.orderId, draggedItem.id, statusId, CURRENT_USER.name);
       addVisualLog('Cập nhật tiến độ', draggedItem.name, `Chuyển từ [${oldStatusTitle}] sang [${newStatusTitle}]`, 'info');
     }
-    
+
     setDraggedItem(null);
   };
 
@@ -273,15 +564,63 @@ export const KanbanBoard: React.FC = () => {
     if (!modalConfig.item) return;
 
     if (!reasonInput.trim()) {
-       alert("Vui lòng nhập nội dung ghi chú!");
-       return;
+      alert("Vui lòng nhập nội dung ghi chú!");
+      return;
     }
 
     const oldStatusTitle = columns.find(c => c.id === modalConfig.item?.status)?.title;
 
     if (modalConfig.type === 'CANCEL') {
-      addVisualLog('Hủy công việc', modalConfig.item.name, `Lý do: ${reasonInput}`, 'danger');
-    } 
+      // Check if we need to move to previous workflow
+      if (modalConfig.previousWorkflow) {
+        const { workflow: prevWf, stage: lastStage } = modalConfig.previousWorkflow;
+        const order = orders.find(o => o.id === modalConfig.item.orderId);
+
+        if (order) {
+          const now = Date.now();
+          const updatedItems = order.items.map(item => {
+            if (item.id === modalConfig.item.id) {
+              // Close history
+              const newHistory = [...(item.history || [])];
+              if (newHistory.length > 0) {
+                const lastEntry = newHistory[newHistory.length - 1];
+                if (!lastEntry.leftAt) {
+                  newHistory[newHistory.length - 1] = {
+                    ...lastEntry,
+                    leftAt: now,
+                    duration: now - lastEntry.enteredAt
+                  };
+                }
+              }
+              // Open new history
+              newHistory.push({
+                stageId: lastStage.id,
+                stageName: lastStage.name,
+                enteredAt: now,
+                performedBy: CURRENT_USER.name
+              });
+
+              return {
+                ...item,
+                workflowId: prevWf.id,
+                status: lastStage.id,
+                history: newHistory,
+                lastUpdated: now
+              };
+            }
+            return item;
+          });
+
+          const cleanedOrder = removeUndefined({ ...order, items: updatedItems });
+          updateOrder(order.id, cleanedOrder);
+          addVisualLog('Trả lại quy trình', modalConfig.item.name, `Từ [${oldStatusTitle}] về quy trình: ${prevWf.label} (${lastStage.name}). Lý do: ${reasonInput}`, 'warning');
+        }
+      } else {
+        // Just mark as cancelled
+        updateOrderItemStatus(modalConfig.item.orderId, modalConfig.item.id, 'cancel', CURRENT_USER.name, reasonInput);
+        addVisualLog('Hủy', modalConfig.item.name, `Từ [${oldStatusTitle}]. Lý do: ${reasonInput}`, 'danger');
+      }
+    }
     else if (modalConfig.type === 'BACKWARD' && modalConfig.targetStatus) {
       const newStatusTitle = columns.find(c => c.id === modalConfig.targetStatus)?.title;
       updateOrderItemStatus(modalConfig.item.orderId, modalConfig.item.id, modalConfig.targetStatus, CURRENT_USER.name, reasonInput);
@@ -300,12 +639,12 @@ export const KanbanBoard: React.FC = () => {
     if (activeWorkflow === 'ALL') return items;
     const currentWorkflow = workflows.find(w => w.id === activeWorkflow);
     if (!currentWorkflow) return items;
-    
+
     // If workflow has types, filter by types
     if (currentWorkflow.types && currentWorkflow.types.length > 0) {
       return items.filter(item => currentWorkflow.types.includes(item.type));
     }
-    
+
     // If no types defined, show all items (workflow might be for all types)
     return items;
   }, [items, activeWorkflow, workflows]);
@@ -314,12 +653,12 @@ export const KanbanBoard: React.FC = () => {
     if (workflowId === 'ALL') return items.length;
     const currentWorkflow = workflows.find(w => w.id === workflowId);
     if (!currentWorkflow) return 0;
-    
+
     // If workflow has types, filter by types
     if (currentWorkflow.types && currentWorkflow.types.length > 0) {
       return items.filter(item => currentWorkflow.types.includes(item.type)).length;
     }
-    
+
     // If no types defined, show all items (workflow might be for all types)
     return items.length;
   };
@@ -342,16 +681,16 @@ export const KanbanBoard: React.FC = () => {
           <p className="text-slate-500 mt-1">Quản lý trực quan quy trình sản xuất theo từng nhóm việc.</p>
         </div>
         <div className="flex gap-2">
-           <button 
-             onClick={() => setShowHistory(true)}
-             className="flex items-center gap-2 px-4 py-2 bg-neutral-900 border border-neutral-800 text-slate-300 rounded-lg text-sm font-medium hover:bg-neutral-800 transition-colors relative"
-           >
-             <History size={16} />
-             <span>Lịch sử</span>
-             {logs.length > 0 && (
-                <span className="absolute -top-1 -right-1 w-3 h-3 bg-red-600 rounded-full border border-neutral-900"></span>
-             )}
-           </button>
+          <button
+            onClick={() => setShowHistory(true)}
+            className="flex items-center gap-2 px-4 py-2 bg-neutral-900 border border-neutral-800 text-slate-300 rounded-lg text-sm font-medium hover:bg-neutral-800 transition-colors relative"
+          >
+            <History size={16} />
+            <span>Lịch sử</span>
+            {logs.length > 0 && (
+              <span className="absolute -top-1 -right-1 w-3 h-3 bg-red-600 rounded-full border border-neutral-900"></span>
+            )}
+          </button>
         </div>
       </div>
 
@@ -362,16 +701,15 @@ export const KanbanBoard: React.FC = () => {
           {WORKFLOWS_FILTER.map((wf) => {
             const isActive = activeWorkflow === wf.id;
             const count = getWorkflowCount(wf.id, wf.types);
-            
+
             return (
               <button
                 key={wf.id}
                 onClick={() => setActiveWorkflow(wf.id)}
-                className={`flex items-center justify-between p-3 rounded-xl transition-all text-left group ${
-                  isActive 
-                    ? 'bg-neutral-800 shadow-md border-l-4 border-gold-500' 
-                    : 'hover:bg-neutral-900/50 text-slate-500 border-l-4 border-transparent'
-                }`}
+                className={`flex items-center justify-between p-3 rounded-xl transition-all text-left group ${isActive
+                  ? 'bg-neutral-800 shadow-md border-l-4 border-gold-500'
+                  : 'hover:bg-neutral-900/50 text-slate-500 border-l-4 border-transparent'
+                  }`}
               >
                 <div className="flex items-center gap-3">
                   <div className={`p-2 rounded-lg ${isActive ? 'bg-gold-600 text-black' : 'bg-neutral-800 text-slate-500 group-hover:bg-neutral-700'}`}>
@@ -397,26 +735,26 @@ export const KanbanBoard: React.FC = () => {
               const colItems = filteredItems.filter(i => {
                 // Try exact match first
                 if (i.status === col.id) return true;
-                
+
                 // Try mapping status to stage ID
                 const itemStatusId = mapStatusToStageId(i.status);
                 if (itemStatusId === col.id) return true;
-                
+
                 // Try case-insensitive match
                 if (i.status.toLowerCase() === col.id.toLowerCase()) return true;
-                
+
                 // Try matching with stage name (for backward compatibility)
                 const stage = workflows.flatMap(wf => wf.stages || []).find(s => s.id === col.id);
                 if (stage && (i.status === stage.name || i.status.toLowerCase() === stage.name.toLowerCase())) {
                   return true;
                 }
-                
+
                 return false;
               });
-              
+
               return (
-                <div 
-                  key={col.id} 
+                <div
+                  key={col.id}
                   className="flex-1 flex flex-col bg-neutral-950/50 rounded-xl border border-neutral-800 shadow-sm"
                   onDragOver={handleDragOver}
                   onDrop={(e) => handleDrop(e, col.id)}
@@ -427,15 +765,24 @@ export const KanbanBoard: React.FC = () => {
                       <span className={`w-2.5 h-2.5 rounded-full ${col.dot}`}></span>
                       <h3 className="font-semibold text-slate-300 text-sm uppercase tracking-wide">{col.title}</h3>
                     </div>
-                    <span className="bg-neutral-800 text-slate-400 text-xs px-2.5 py-1 rounded-full font-bold shadow-sm">
-                      {colItems.length}
-                    </span>
+                    <div className="flex items-center gap-1">
+                      <span className="bg-neutral-800 text-slate-400 text-xs px-2.5 py-1 rounded-full font-bold shadow-sm">
+                        {colItems.length}
+                      </span>
+                      <button
+                        onClick={() => setEditingStage({ stageId: col.id, stageName: col.title })}
+                        className="p-1.5 hover:bg-neutral-800 rounded-lg text-slate-500 hover:text-slate-200 transition-colors"
+                        title="Chỉnh sửa tasks mặc định"
+                      >
+                        <MoreHorizontal size={16} />
+                      </button>
+                    </div>
                   </div>
 
                   {/* Column Body */}
                   <div className={`flex-1 overflow-y-auto p-3 space-y-3 ${col.color}`}>
                     {colItems.map(item => (
-                      <div 
+                      <div
                         key={item.id}
                         draggable
                         onDragStart={(e) => handleDragStart(e, item)}
@@ -443,68 +790,75 @@ export const KanbanBoard: React.FC = () => {
                       >
                         <div className="flex gap-3">
                           <div className="w-16 h-16 rounded-md bg-neutral-800 overflow-hidden flex-shrink-0 relative">
-                             {item.beforeImage ? (
-                               <img src={item.beforeImage} alt="" className="w-full h-full object-cover opacity-80" />
-                             ) : (
-                               <div className="w-full h-full flex items-center justify-center text-slate-600 text-xs">No Img</div>
-                             )}
+                            {item.beforeImage ? (
+                              <img src={item.beforeImage} alt="" className="w-full h-full object-cover opacity-80" />
+                            ) : (
+                              <div className="w-full h-full flex items-center justify-center text-slate-600 text-xs">No Img</div>
+                            )}
                           </div>
                           <div className="flex-1 min-w-0">
                             <div className="flex justify-between items-start">
-                               <span className="text-[10px] font-mono text-slate-500 bg-neutral-800 px-1 rounded">{item.id}</span>
-                               <div className="flex items-center gap-1">
-                                 {/* Cancel Button */}
-                                 <button 
-                                    onClick={(e) => { e.stopPropagation(); handleCancelRequest(item); }}
-                                    className="text-slate-600 hover:text-red-500 p-1 rounded hover:bg-red-900/20 transition-colors"
-                                    title="Hủy công việc"
-                                 >
-                                   <XCircle size={14} />
-                                 </button>
-                               </div>
+                              <span className="text-[10px] font-mono text-slate-500 bg-neutral-800 px-1 rounded">{item.id}</span>
+                              <div className="flex items-center gap-1">
+                                {/* Cancel Button */}
+                                <button
+                                  onClick={(e) => { e.stopPropagation(); handleCancelRequest(item); }}
+                                  className="text-slate-600 hover:text-red-500 p-1 rounded hover:bg-red-900/20 transition-colors"
+                                  title="Hủy công việc"
+                                >
+                                  <XCircle size={14} />
+                                </button>
+                              </div>
                             </div>
                             <h4 className="font-medium text-slate-200 text-sm truncate mt-1" title={item.name}>{item.name}</h4>
                             <div className="flex items-center gap-1.5 mt-1 text-xs text-slate-500">
-                               <User size={12} className="text-slate-600" />
-                               <span className="truncate">{item.customerName}</span>
+                              <User size={12} className="text-slate-600" />
+                              <span className="truncate">{item.customerName}</span>
                             </div>
-                            {item.note && (
-                               <div className="mt-2 text-[10px] bg-orange-900/20 text-orange-400 px-2 py-1 rounded border border-orange-900/30 flex items-start gap-1">
+                            {/* Show latest technical log (reason for backward/cancel) */}
+                            {item.technicalLog && item.technicalLog.length > 0 && (() => {
+                              const latestLog = item.technicalLog[item.technicalLog.length - 1];
+                              return (
+                                <div className="mt-2 text-[10px] bg-orange-900/20 text-orange-400 px-2 py-1 rounded border border-orange-900/30 flex items-start gap-1">
                                   <AlertTriangle size={10} className="mt-0.5 flex-shrink-0" />
-                                  <span className="line-clamp-2">{item.note}</span>
-                               </div>
-                            )}
+                                  <div className="flex-1 min-w-0">
+                                    <div className="font-semibold text-orange-300">{latestLog.author} - {latestLog.timestamp}</div>
+                                    <div className="line-clamp-2 mt-0.5">{latestLog.content}</div>
+                                  </div>
+                                </div>
+                              );
+                            })()}
                           </div>
                         </div>
-                        
-                        <div className="mt-3 pt-3 border-t border-neutral-800 flex flex-col gap-2">
-                           <div className="flex justify-between items-center">
-                              <div className="flex items-center gap-1.5 text-xs text-slate-500 bg-neutral-800 px-2 py-1 rounded border border-neutral-800">
-                                  <Calendar size={12} />
-                                  <span>{item.expectedDelivery}</span>
-                              </div>
-                              <span className="text-xs font-bold text-gold-500">{item.price.toLocaleString()} ₫</span>
-                           </div>
 
-                           {/* Last Updated / Duration Badge */}
-                           {item.lastUpdated && (
-                               <div className="text-[10px] text-slate-600 flex items-center justify-end gap-1">
-                                   <Clock size={10} />
-                                   <span>
-                                     {new Date(item.lastUpdated).toLocaleTimeString('vi-VN', {hour:'2-digit', minute:'2-digit'})}
-                                   </span>
-                               </div>
-                           )}
-                           
-                           {/* Previous Stage Duration Info (if exists) */}
-                           {item.history && item.history.length > 1 && item.history[item.history.length - 2].duration && (
-                               <div className="text-[10px] text-emerald-400 bg-emerald-900/20 px-2 py-0.5 rounded flex items-center gap-1 border border-emerald-900/30">
-                                  <Info size={10} />
-                                  <span>
-                                    Bước trước: {formatDuration(item.history[item.history.length - 2].duration || 0)}
-                                  </span>
-                               </div>
-                           )}
+                        <div className="mt-3 pt-3 border-t border-neutral-800 flex flex-col gap-2">
+                          <div className="flex justify-between items-center">
+                            <div className="flex items-center gap-1.5 text-xs text-slate-500 bg-neutral-800 px-2 py-1 rounded border border-neutral-800">
+                              <Calendar size={12} />
+                              <span>{item.expectedDelivery}</span>
+                            </div>
+                            <span className="text-xs font-bold text-gold-500">{item.price.toLocaleString()} ₫</span>
+                          </div>
+
+                          {/* Last Updated / Duration Badge */}
+                          {item.lastUpdated && (
+                            <div className="text-[10px] text-slate-600 flex items-center justify-end gap-1">
+                              <Clock size={10} />
+                              <span>
+                                {new Date(item.lastUpdated).toLocaleTimeString('vi-VN', { hour: '2-digit', minute: '2-digit' })}
+                              </span>
+                            </div>
+                          )}
+
+                          {/* Previous Stage Duration Info (if exists) */}
+                          {item.history && item.history.length > 1 && item.history[item.history.length - 2].duration && (
+                            <div className="text-[10px] text-emerald-400 bg-emerald-900/20 px-2 py-0.5 rounded flex items-center gap-1 border border-emerald-900/30">
+                              <Info size={10} />
+                              <span>
+                                Bước trước: {formatDuration(item.history[item.history.length - 2].duration || 0)}
+                              </span>
+                            </div>
+                          )}
                         </div>
                       </div>
                     ))}
@@ -521,18 +875,15 @@ export const KanbanBoard: React.FC = () => {
         <div className="fixed inset-0 bg-black/80 backdrop-blur-sm z-[100] flex items-center justify-center p-4">
           <div className="bg-neutral-900 rounded-xl shadow-2xl w-full max-w-md overflow-hidden transform transition-all scale-100 border border-neutral-800">
             {/* Flashing Header */}
-            <div className={`p-4 flex items-center gap-3 ${
-              modalConfig.type === 'CANCEL' ? 'bg-red-900/20' : 'bg-orange-900/20'
-            }`}>
-              <div className={`p-2 rounded-full ${
-                modalConfig.type === 'CANCEL' ? 'bg-red-900/40 text-red-500' : 'bg-orange-900/40 text-orange-500'
-              } animate-pulse`}> 
+            <div className={`p-4 flex items-center gap-3 ${modalConfig.type === 'CANCEL' ? 'bg-red-900/20' : 'bg-orange-900/20'
+              }`}>
+              <div className={`p-2 rounded-full ${modalConfig.type === 'CANCEL' ? 'bg-red-900/40 text-red-500' : 'bg-orange-900/40 text-orange-500'
+                } animate-pulse`}>
                 {modalConfig.type === 'CANCEL' ? <AlertTriangle size={24} /> : <RotateCcw size={24} />}
               </div>
               <div>
-                <h3 className={`font-bold text-lg ${
-                  modalConfig.type === 'CANCEL' ? 'text-red-500' : 'text-orange-500'
-                } animate-pulse`}>
+                <h3 className={`font-bold text-lg ${modalConfig.type === 'CANCEL' ? 'text-red-500' : 'text-orange-500'
+                  } animate-pulse`}>
                   {modalConfig.type === 'CANCEL' ? 'Xác nhận Hủy Công Việc' : 'Cảnh báo: Lùi Quy Trình'}
                 </h3>
               </div>
@@ -540,7 +891,7 @@ export const KanbanBoard: React.FC = () => {
 
             <div className="p-6">
               <p className="text-slate-400 mb-4 text-sm">
-                {modalConfig.type === 'CANCEL' 
+                {modalConfig.type === 'CANCEL'
                   ? `Bạn có chắc chắn muốn hủy công việc "${modalConfig.item?.name}" không? Hành động này không thể hoàn tác.`
                   : `Bạn đang chuyển công việc "${modalConfig.item?.name}" về bước trước đó. Vui lòng ghi rõ lý do (VD: QC không đạt, làm lại...).`
                 }
@@ -551,16 +902,15 @@ export const KanbanBoard: React.FC = () => {
                   {modalConfig.type === 'CANCEL' ? 'Lý do hủy' : 'Ghi chú / Lý do trả lại'}
                   <span className={modalConfig.type === 'CANCEL' ? "text-red-500" : "text-orange-500"}> *</span>
                 </label>
-                <textarea 
-                  className={`w-full p-3 border rounded-lg focus:ring-1 outline-none text-sm bg-neutral-950 text-slate-200 ${
-                    modalConfig.type === 'CANCEL' 
-                      ? 'border-red-900 focus:border-red-500' 
-                      : 'border-orange-900 focus:border-orange-500'
-                  }`}
+                <textarea
+                  className={`w-full p-3 border rounded-lg focus:ring-1 outline-none text-sm bg-neutral-950 text-slate-200 ${modalConfig.type === 'CANCEL'
+                    ? 'border-red-900 focus:border-red-500'
+                    : 'border-orange-900 focus:border-orange-500'
+                    }`}
                   rows={3}
                   placeholder={
-                    modalConfig.type === 'CANCEL' 
-                      ? "Nhập lý do hủy đơn..." 
+                    modalConfig.type === 'CANCEL'
+                      ? "Nhập lý do hủy đơn..."
                       : "Nhập lý do chuyển lại bước trước (VD: Đường chỉ lỗi, màu chưa chuẩn...)"
                   }
                   value={reasonInput}
@@ -570,19 +920,18 @@ export const KanbanBoard: React.FC = () => {
               </div>
 
               <div className="flex justify-end gap-3 mt-2">
-                <button 
+                <button
                   onClick={closeModal}
                   className="px-4 py-2 border border-neutral-700 rounded-lg text-slate-400 hover:bg-neutral-800 font-medium text-sm"
                 >
                   Quay lại
                 </button>
-                <button 
+                <button
                   onClick={confirmAction}
-                  className={`px-4 py-2 rounded-lg text-white font-medium shadow-lg transition-all text-sm ${
-                    modalConfig.type === 'CANCEL' 
-                      ? 'bg-red-700 hover:bg-red-800 shadow-red-900/20' 
-                      : 'bg-orange-600 hover:bg-orange-700 shadow-orange-900/20'
-                  }`}
+                  className={`px-4 py-2 rounded-lg text-white font-medium shadow-lg transition-all text-sm ${modalConfig.type === 'CANCEL'
+                    ? 'bg-red-700 hover:bg-red-800 shadow-red-900/20'
+                    : 'bg-orange-600 hover:bg-orange-700 shadow-orange-900/20'
+                    }`}
                 >
                   Xác nhận
                 </button>
@@ -605,53 +954,63 @@ export const KanbanBoard: React.FC = () => {
                 <XCircle size={20} className="text-slate-500" />
               </button>
             </div>
-            
+
             <div className="flex-1 overflow-y-auto p-4 space-y-4">
-               {logs.length === 0 ? (
-                 <div className="text-center py-10 text-slate-600">
-                   <History size={48} className="mx-auto mb-3 opacity-20" />
-                   <p>Chưa có hoạt động nào được ghi nhận trong phiên này.</p>
-                 </div>
-               ) : (
-                 logs.map(log => (
-                   <div key={log.id} className="flex gap-3 relative pb-6 last:pb-0">
-                     <div className="absolute left-[15px] top-8 bottom-0 w-px bg-neutral-800 last:hidden"></div>
-                     <div className="flex-shrink-0">
-                       {log.userAvatar ? (
-                         <img src={log.userAvatar} alt="" className="w-8 h-8 rounded-full border border-neutral-700" />
-                       ) : (
-                         <div className="w-8 h-8 rounded-full bg-neutral-800 flex items-center justify-center text-xs font-bold text-slate-400">
-                           {log.user.charAt(0)}
-                         </div>
-                       )}
-                     </div>
-                     <div className="flex-1">
-                        <div className="bg-neutral-950 p-3 rounded-lg border border-neutral-800">
-                          <div className="flex justify-between items-start mb-1">
-                            <span className="font-semibold text-sm text-slate-300">{log.user}</span>
-                            <span className="text-[10px] text-slate-500 flex items-center gap-1">
-                              <Clock size={10} /> {log.timestamp}
-                            </span>
-                          </div>
-                          <p className={`text-xs font-medium mb-1 ${
-                            log.type === 'danger' ? 'text-red-500' : 
-                            log.type === 'warning' ? 'text-orange-500' : 'text-blue-500'
-                          }`}>
-                            {log.action}: {log.itemName}
-                          </p>
-                          {log.details && (
-                            <p className="text-xs text-slate-500 leading-relaxed italic border-t border-neutral-800 pt-1 mt-1">
-                              "{log.details}"
-                            </p>
-                          )}
+              {logs.length === 0 ? (
+                <div className="text-center py-10 text-slate-600">
+                  <History size={48} className="mx-auto mb-3 opacity-20" />
+                  <p>Chưa có hoạt động nào được ghi nhận trong phiên này.</p>
+                </div>
+              ) : (
+                logs.map(log => (
+                  <div key={log.id} className="flex gap-3 relative pb-6 last:pb-0">
+                    <div className="absolute left-[15px] top-8 bottom-0 w-px bg-neutral-800 last:hidden"></div>
+                    <div className="flex-shrink-0">
+                      {log.userAvatar ? (
+                        <img src={log.userAvatar} alt="" className="w-8 h-8 rounded-full border border-neutral-700" />
+                      ) : (
+                        <div className="w-8 h-8 rounded-full bg-neutral-800 flex items-center justify-center text-xs font-bold text-slate-400">
+                          {log.user.charAt(0)}
                         </div>
-                     </div>
-                   </div>
-                 ))
-               )}
+                      )}
+                    </div>
+                    <div className="flex-1">
+                      <div className="bg-neutral-950 p-3 rounded-lg border border-neutral-800">
+                        <div className="flex justify-between items-start mb-1">
+                          <span className="font-semibold text-sm text-slate-300">{log.user}</span>
+                          <span className="text-[10px] text-slate-500 flex items-center gap-1">
+                            <Clock size={10} /> {log.timestamp}
+                          </span>
+                        </div>
+                        <p className={`text-xs font-medium mb-1 ${log.type === 'danger' ? 'text-red-500' :
+                          log.type === 'warning' ? 'text-orange-500' : 'text-blue-500'
+                          }`}>
+                          {log.action}: {log.itemName}
+                        </p>
+                        {log.details && (
+                          <p className="text-xs text-slate-500 leading-relaxed italic border-t border-neutral-800 pt-1 mt-1">
+                            "{log.details}"
+                          </p>
+                        )}
+                      </div>
+                    </div>
+                  </div>
+                ))
+              )}
             </div>
           </div>
         </div>
+      )}
+
+
+      {/* Edit Stage Tasks Modal */}
+      {editingStage && (
+        <EditStageTasksModal
+          stageId={editingStage.stageId}
+          stageName={editingStage.stageName}
+          currentWorkflow={workflows.find(wf => wf.id === activeWorkflow)}
+          onClose={() => setEditingStage(null)}
+        />
       )}
     </div>
   );

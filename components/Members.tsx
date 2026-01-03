@@ -1,11 +1,10 @@
 import React, { useState, useMemo, useRef, useEffect } from 'react';
 import { Users, Search, Plus, Phone, Mail, Building2, Briefcase, UserCheck, UserX, MoreHorizontal, Eye, Edit, Trash2 } from 'lucide-react';
-import { MOCK_MEMBERS } from '../constants';
 import { Member } from '../types';
 import { useAppStore } from '../context';
 
 // Action Menu Component
-const ActionMenu: React.FC<{ 
+const ActionMenu: React.FC<{
   onView: () => void;
   onEdit: () => void;
   onDelete: () => void;
@@ -35,7 +34,7 @@ const ActionMenu: React.FC<{
       >
         <MoreHorizontal size={20} />
       </button>
-      
+
       {isOpen && (
         <div className="absolute right-0 top-full mt-1 bg-neutral-800 border border-neutral-700 rounded-lg shadow-xl z-50 min-w-[140px] overflow-hidden">
           <button
@@ -91,7 +90,7 @@ const getDepartment = (role: Member['role']): string => {
 };
 
 export const Members: React.FC = () => {
-  const { updateMember, deleteMember, addMember } = useAppStore();
+  const { members, updateMember, deleteMember, addMember } = useAppStore();
   const [searchText, setSearchText] = useState('');
   const [statusFilter, setStatusFilter] = useState<'all' | 'Active' | 'Off'>('all');
   const [showAddModal, setShowAddModal] = useState(false);
@@ -111,25 +110,25 @@ export const Members: React.FC = () => {
   // Group members by department
   const membersByDept = useMemo(() => {
     const grouped: Record<string, Member[]> = {};
-    
-    let filtered = MOCK_MEMBERS;
-    
+
+    let filtered = members || [];
+
     // Filter by search
     if (searchText.trim()) {
       const search = searchText.toLowerCase();
-      filtered = filtered.filter(m => 
+      filtered = filtered.filter(m =>
         m.name.toLowerCase().includes(search) ||
         m.phone.includes(search) ||
-        m.email.toLowerCase().includes(search) ||
+        (m.email && m.email.toLowerCase().includes(search)) ||
         (m.specialty && m.specialty.toLowerCase().includes(search))
       );
     }
-    
+
     // Filter by status
     if (statusFilter !== 'all') {
       filtered = filtered.filter(m => m.status === statusFilter);
     }
-    
+
     // Group by department
     filtered.forEach(member => {
       const dept = member.department || getDepartment(member.role);
@@ -138,31 +137,31 @@ export const Members: React.FC = () => {
       }
       grouped[dept].push(member);
     });
-    
+
     return grouped;
-  }, [searchText, statusFilter]);
+  }, [members, searchText, statusFilter]);
 
   const handleAddMember = async () => {
-    if (!newMember.name || !newMember.phone || !newMember.email) {
-      alert('Vui lòng điền đầy đủ thông tin bắt buộc!');
+    if (!newMember.name || !newMember.phone) {
+      alert('Vui lòng điền đầy đủ thông tin bắt buộc (Tên, SĐT)!');
       return;
     }
-    
+
     try {
       const memberData: Member = {
         id: `S${Date.now().toString().slice(-6)}`,
         name: newMember.name,
         role: newMember.role,
         phone: newMember.phone,
-        email: newMember.email,
+        email: newMember.email || '',
         status: newMember.status,
         department: newMember.department,
-        specialty: newMember.specialty || undefined,
-        avatar: newMember.avatar || undefined
+        specialty: newMember.specialty, // Removed || undefined
+        avatar: newMember.avatar // Removed || undefined
       };
-      
+
       await addMember(memberData);
-      
+
       setNewMember({
         name: '',
         role: 'Tư vấn viên',
@@ -181,13 +180,21 @@ export const Members: React.FC = () => {
   };
 
   const handleUpdateMember = async () => {
-    if (!editingMember || !editingMember.name || !editingMember.phone || !editingMember.email) {
+    if (!editingMember || !editingMember.name || !editingMember.phone) {
       alert('Vui lòng điền đầy đủ thông tin bắt buộc!');
       return;
     }
-    
+
     try {
-      await updateMember(editingMember.id, editingMember);
+      // Ensure no undefined values in update
+      const updatedData = {
+        ...editingMember,
+        email: editingMember.email || '',
+        specialty: editingMember.specialty || '',
+        avatar: editingMember.avatar || ''
+      };
+
+      await updateMember(editingMember.id, updatedData);
       setShowEditModal(false);
       setEditingMember(null);
     } catch (error: any) {
@@ -215,8 +222,8 @@ export const Members: React.FC = () => {
     }
   };
 
-  const totalMembers = MOCK_MEMBERS.length;
-  const activeMembers = MOCK_MEMBERS.filter(m => m.status === 'Active').length;
+  const totalMembers = members ? members.length : 0;
+  const activeMembers = members ? members.filter(m => m.status === 'Active').length : 0;
 
   return (
     <div className="space-y-6">
@@ -226,14 +233,14 @@ export const Members: React.FC = () => {
           <div className="bg-neutral-900 rounded-xl shadow-2xl border border-neutral-800 w-full max-w-2xl max-h-[90vh] overflow-y-auto">
             <div className="sticky top-0 bg-neutral-900 border-b border-neutral-800 p-6 flex justify-between items-center">
               <h2 className="text-xl font-serif font-bold text-slate-100">Thêm Nhân Sự Mới</h2>
-              <button 
+              <button
                 onClick={() => setShowAddModal(false)}
                 className="text-slate-500 hover:text-slate-300 transition-colors"
               >
                 ✕
               </button>
             </div>
-            
+
             <div className="p-6 space-y-4">
               <div>
                 <label className="block text-sm font-medium text-slate-400 mb-2">
@@ -242,12 +249,12 @@ export const Members: React.FC = () => {
                 <input
                   type="text"
                   value={newMember.name}
-                  onChange={(e) => setNewMember({...newMember, name: e.target.value})}
+                  onChange={(e) => setNewMember({ ...newMember, name: e.target.value })}
                   placeholder="VD: Nguyễn Văn A"
                   className="w-full px-4 py-2 bg-neutral-800 border border-neutral-700 rounded-lg text-slate-200 focus:ring-2 focus:ring-gold-500 outline-none transition-all placeholder-slate-600"
                 />
               </div>
-              
+
               <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
                 <div>
                   <label className="block text-sm font-medium text-slate-400 mb-2">
@@ -257,7 +264,7 @@ export const Members: React.FC = () => {
                     value={newMember.role}
                     onChange={(e) => {
                       const role = e.target.value as Member['role'];
-                      setNewMember({...newMember, role, department: getDepartment(role) as Member['department']});
+                      setNewMember({ ...newMember, role, department: getDepartment(role) as Member['department'] });
                     }}
                     className="w-full px-4 py-2 bg-neutral-800 border border-neutral-700 rounded-lg text-slate-200 focus:ring-2 focus:ring-gold-500 outline-none transition-all"
                   >
@@ -267,14 +274,14 @@ export const Members: React.FC = () => {
                     <option value="Quản lý">Quản lý</option>
                   </select>
                 </div>
-                
+
                 <div>
                   <label className="block text-sm font-medium text-slate-400 mb-2">
                     Phòng ban <span className="text-red-500">*</span>
                   </label>
                   <select
                     value={newMember.department}
-                    onChange={(e) => setNewMember({...newMember, department: e.target.value as Member['department']})}
+                    onChange={(e) => setNewMember({ ...newMember, department: e.target.value as Member['department'] })}
                     className="w-full px-4 py-2 bg-neutral-800 border border-neutral-700 rounded-lg text-slate-200 focus:ring-2 focus:ring-gold-500 outline-none transition-all"
                   >
                     <option value="Kỹ Thuật">Kỹ Thuật</option>
@@ -286,19 +293,19 @@ export const Members: React.FC = () => {
                   </select>
                 </div>
               </div>
-              
+
               <div>
                 <label className="block text-sm font-medium text-slate-400 mb-2">Trạng thái</label>
                 <select
                   value={newMember.status}
-                  onChange={(e) => setNewMember({...newMember, status: e.target.value as Member['status']})}
+                  onChange={(e) => setNewMember({ ...newMember, status: e.target.value as Member['status'] })}
                   className="w-full px-4 py-2 bg-neutral-800 border border-neutral-700 rounded-lg text-slate-200 focus:ring-2 focus:ring-gold-500 outline-none transition-all"
                 >
                   <option value="Active">Đang làm việc</option>
                   <option value="Off">Nghỉ việc</option>
                 </select>
               </div>
-              
+
               <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
                 <div>
                   <label className="block text-sm font-medium text-slate-400 mb-2">
@@ -307,53 +314,53 @@ export const Members: React.FC = () => {
                   <input
                     type="tel"
                     value={newMember.phone}
-                    onChange={(e) => setNewMember({...newMember, phone: e.target.value})}
+                    onChange={(e) => setNewMember({ ...newMember, phone: e.target.value })}
                     placeholder="0909 123 456"
                     className="w-full px-4 py-2 bg-neutral-800 border border-neutral-700 rounded-lg text-slate-200 focus:ring-2 focus:ring-gold-500 outline-none transition-all placeholder-slate-600"
                   />
                 </div>
-                
+
                 <div>
                   <label className="block text-sm font-medium text-slate-400 mb-2">
-                    Email <span className="text-red-500">*</span>
+                    Email
                   </label>
                   <input
                     type="email"
                     value={newMember.email}
-                    onChange={(e) => setNewMember({...newMember, email: e.target.value})}
+                    onChange={(e) => setNewMember({ ...newMember, email: e.target.value })}
                     placeholder="example@xoxo.vn"
                     className="w-full px-4 py-2 bg-neutral-800 border border-neutral-700 rounded-lg text-slate-200 focus:ring-2 focus:ring-gold-500 outline-none transition-all placeholder-slate-600"
                   />
                 </div>
               </div>
-              
+
               {newMember.role === 'Kỹ thuật viên' && (
                 <div>
                   <label className="block text-sm font-medium text-slate-400 mb-2">Chuyên môn</label>
                   <input
                     type="text"
                     value={newMember.specialty}
-                    onChange={(e) => setNewMember({...newMember, specialty: e.target.value})}
+                    onChange={(e) => setNewMember({ ...newMember, specialty: e.target.value })}
                     placeholder="VD: Phục hồi màu, Xi mạ vàng..."
                     className="w-full px-4 py-2 bg-neutral-800 border border-neutral-700 rounded-lg text-slate-200 focus:ring-2 focus:ring-gold-500 outline-none transition-all placeholder-slate-600"
                   />
                 </div>
               )}
-              
+
               <div>
                 <label className="block text-sm font-medium text-slate-400 mb-2">URL Ảnh đại diện</label>
                 <input
                   type="url"
                   value={newMember.avatar}
-                  onChange={(e) => setNewMember({...newMember, avatar: e.target.value})}
+                  onChange={(e) => setNewMember({ ...newMember, avatar: e.target.value })}
                   placeholder="https://..."
                   className="w-full px-4 py-2 bg-neutral-800 border border-neutral-700 rounded-lg text-slate-200 focus:ring-2 focus:ring-gold-500 outline-none transition-all placeholder-slate-600"
                 />
                 {newMember.avatar && (
                   <div className="mt-2">
-                    <img 
-                      src={newMember.avatar} 
-                      alt="Preview" 
+                    <img
+                      src={newMember.avatar}
+                      alt="Preview"
                       className="w-20 h-20 rounded-lg object-cover border border-neutral-700"
                       onError={(e) => {
                         (e.target as HTMLImageElement).style.display = 'none';
@@ -363,7 +370,7 @@ export const Members: React.FC = () => {
                 )}
               </div>
             </div>
-            
+
             <div className="sticky bottom-0 bg-neutral-900 border-t border-neutral-800 p-6 flex gap-3 justify-end">
               <button
                 onClick={() => setShowAddModal(false)}
@@ -388,7 +395,7 @@ export const Members: React.FC = () => {
           <div className="bg-neutral-900 rounded-xl shadow-2xl border border-neutral-800 w-full max-w-2xl max-h-[90vh] overflow-y-auto">
             <div className="sticky top-0 bg-neutral-900 border-b border-neutral-800 p-6 flex justify-between items-center">
               <h2 className="text-xl font-serif font-bold text-slate-100">Sửa Nhân Sự</h2>
-              <button 
+              <button
                 onClick={() => {
                   setShowEditModal(false);
                   setEditingMember(null);
@@ -398,7 +405,7 @@ export const Members: React.FC = () => {
                 ✕
               </button>
             </div>
-            
+
             <div className="p-6 space-y-4">
               <div>
                 <label className="block text-sm font-medium text-slate-400 mb-2">
@@ -407,12 +414,12 @@ export const Members: React.FC = () => {
                 <input
                   type="text"
                   value={editingMember.name}
-                  onChange={(e) => setEditingMember({...editingMember, name: e.target.value})}
+                  onChange={(e) => setEditingMember({ ...editingMember, name: e.target.value })}
                   placeholder="VD: Nguyễn Văn A"
                   className="w-full px-4 py-2 bg-neutral-800 border border-neutral-700 rounded-lg text-slate-200 focus:ring-2 focus:ring-gold-500 outline-none transition-all placeholder-slate-600"
                 />
               </div>
-              
+
               <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
                 <div>
                   <label className="block text-sm font-medium text-slate-400 mb-2">
@@ -423,8 +430,8 @@ export const Members: React.FC = () => {
                     onChange={(e) => {
                       const role = e.target.value as Member['role'];
                       setEditingMember({
-                        ...editingMember, 
-                        role, 
+                        ...editingMember,
+                        role,
                         department: getDepartment(role) as Member['department']
                       });
                     }}
@@ -436,14 +443,14 @@ export const Members: React.FC = () => {
                     <option value="Quản lý">Quản lý</option>
                   </select>
                 </div>
-                
+
                 <div>
                   <label className="block text-sm font-medium text-slate-400 mb-2">
                     Phòng ban <span className="text-red-500">*</span>
                   </label>
                   <select
                     value={editingMember.department || getDepartment(editingMember.role)}
-                    onChange={(e) => setEditingMember({...editingMember, department: e.target.value as Member['department']})}
+                    onChange={(e) => setEditingMember({ ...editingMember, department: e.target.value as Member['department'] })}
                     className="w-full px-4 py-2 bg-neutral-800 border border-neutral-700 rounded-lg text-slate-200 focus:ring-2 focus:ring-gold-500 outline-none transition-all"
                   >
                     <option value="Kỹ Thuật">Kỹ Thuật</option>
@@ -455,19 +462,19 @@ export const Members: React.FC = () => {
                   </select>
                 </div>
               </div>
-              
+
               <div>
                 <label className="block text-sm font-medium text-slate-400 mb-2">Trạng thái</label>
                 <select
                   value={editingMember.status}
-                  onChange={(e) => setEditingMember({...editingMember, status: e.target.value as Member['status']})}
+                  onChange={(e) => setEditingMember({ ...editingMember, status: e.target.value as Member['status'] })}
                   className="w-full px-4 py-2 bg-neutral-800 border border-neutral-700 rounded-lg text-slate-200 focus:ring-2 focus:ring-gold-500 outline-none transition-all"
                 >
                   <option value="Active">Đang làm việc</option>
                   <option value="Off">Nghỉ việc</option>
                 </select>
               </div>
-              
+
               <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
                 <div>
                   <label className="block text-sm font-medium text-slate-400 mb-2">
@@ -476,53 +483,53 @@ export const Members: React.FC = () => {
                   <input
                     type="tel"
                     value={editingMember.phone}
-                    onChange={(e) => setEditingMember({...editingMember, phone: e.target.value})}
+                    onChange={(e) => setEditingMember({ ...editingMember, phone: e.target.value })}
                     placeholder="0909 123 456"
                     className="w-full px-4 py-2 bg-neutral-800 border border-neutral-700 rounded-lg text-slate-200 focus:ring-2 focus:ring-gold-500 outline-none transition-all placeholder-slate-600"
                   />
                 </div>
-                
+
                 <div>
                   <label className="block text-sm font-medium text-slate-400 mb-2">
-                    Email <span className="text-red-500">*</span>
+                    Email
                   </label>
                   <input
                     type="email"
                     value={editingMember.email}
-                    onChange={(e) => setEditingMember({...editingMember, email: e.target.value})}
+                    onChange={(e) => setEditingMember({ ...editingMember, email: e.target.value })}
                     placeholder="example@xoxo.vn"
                     className="w-full px-4 py-2 bg-neutral-800 border border-neutral-700 rounded-lg text-slate-200 focus:ring-2 focus:ring-gold-500 outline-none transition-all placeholder-slate-600"
                   />
                 </div>
               </div>
-              
+
               {editingMember.role === 'Kỹ thuật viên' && (
                 <div>
                   <label className="block text-sm font-medium text-slate-400 mb-2">Chuyên môn</label>
                   <input
                     type="text"
                     value={editingMember.specialty || ''}
-                    onChange={(e) => setEditingMember({...editingMember, specialty: e.target.value})}
+                    onChange={(e) => setEditingMember({ ...editingMember, specialty: e.target.value })}
                     placeholder="VD: Phục hồi màu, Xi mạ vàng..."
                     className="w-full px-4 py-2 bg-neutral-800 border border-neutral-700 rounded-lg text-slate-200 focus:ring-2 focus:ring-gold-500 outline-none transition-all placeholder-slate-600"
                   />
                 </div>
               )}
-              
+
               <div>
                 <label className="block text-sm font-medium text-slate-400 mb-2">URL Ảnh đại diện</label>
                 <input
                   type="url"
                   value={editingMember.avatar || ''}
-                  onChange={(e) => setEditingMember({...editingMember, avatar: e.target.value})}
+                  onChange={(e) => setEditingMember({ ...editingMember, avatar: e.target.value })}
                   placeholder="https://..."
                   className="w-full px-4 py-2 bg-neutral-800 border border-neutral-700 rounded-lg text-slate-200 focus:ring-2 focus:ring-gold-500 outline-none transition-all placeholder-slate-600"
                 />
                 {editingMember.avatar && (
                   <div className="mt-2">
-                    <img 
-                      src={editingMember.avatar} 
-                      alt="Preview" 
+                    <img
+                      src={editingMember.avatar}
+                      alt="Preview"
                       className="w-20 h-20 rounded-lg object-cover border border-neutral-700"
                       onError={(e) => {
                         (e.target as HTMLImageElement).style.display = 'none';
@@ -532,7 +539,7 @@ export const Members: React.FC = () => {
                 )}
               </div>
             </div>
-            
+
             <div className="sticky bottom-0 bg-neutral-900 border-t border-neutral-800 p-6 flex gap-3 justify-end">
               <button
                 onClick={() => {
@@ -559,7 +566,7 @@ export const Members: React.FC = () => {
           <h1 className="text-2xl font-serif font-bold text-slate-100">Quản Lý Nhân Sự</h1>
           <p className="text-slate-500 mt-1">Danh sách nhân viên theo phòng ban và vai trò.</p>
         </div>
-        <button 
+        <button
           onClick={() => setShowAddModal(true)}
           className="flex items-center gap-2 bg-gold-600 hover:bg-gold-700 text-black font-medium px-4 py-2.5 rounded-lg shadow-lg shadow-gold-900/20 transition-all"
         >
@@ -603,9 +610,9 @@ export const Members: React.FC = () => {
       <div className="bg-neutral-900 p-4 rounded-xl shadow-lg shadow-black/20 border border-neutral-800 flex flex-col sm:flex-row gap-4">
         <div className="relative flex-1 max-w-md">
           <Search className="absolute left-3 top-1/2 -translate-y-1/2 text-slate-500" size={18} />
-          <input 
-            type="text" 
-            placeholder="Tìm theo tên, SĐT, email..." 
+          <input
+            type="text"
+            placeholder="Tìm theo tên, SĐT, email..."
             value={searchText}
             onChange={(e) => setSearchText(e.target.value)}
             className="w-full pl-10 pr-4 py-2 bg-neutral-800 border border-neutral-700 rounded-lg text-slate-200 focus:ring-1 focus:ring-gold-500 outline-none transition-all placeholder-slate-600"
@@ -633,11 +640,11 @@ export const Members: React.FC = () => {
                 {members.length} người
               </span>
             </h3>
-            
+
             <div className="grid grid-cols-1 gap-4">
               {members.map((member) => (
-                <div 
-                  key={member.id} 
+                <div
+                  key={member.id}
                   className="bg-neutral-900 p-4 rounded-xl shadow-lg shadow-black/20 border border-neutral-800 flex gap-6 items-center hover:border-gold-900/30 transition-all"
                 >
                   <div className="w-24 h-24 rounded-lg bg-neutral-800 border border-neutral-700 overflow-hidden flex-shrink-0">
@@ -665,13 +672,13 @@ export const Members: React.FC = () => {
                         itemName={member.name}
                         onView={() => alert(`Xem chi tiết nhân viên: ${member.name}\n\nID: ${member.id}\nVai trò: ${member.role}\nPhòng ban: ${member.department || getDepartment(member.role)}\nSĐT: ${member.phone}\nEmail: ${member.email}\nTrạng thái: ${member.status === 'Active' ? 'Đang làm việc' : 'Nghỉ việc'}\nChuyên môn: ${member.specialty || 'Không có'}`)}
                         onEdit={() => {
-                          setEditingMember({...member});
+                          setEditingMember({ ...member });
                           setShowEditModal(true);
                         }}
                         onDelete={() => handleDeleteMember(member.id)}
                       />
                     </div>
-                    
+
                     <div className="mt-4 flex items-center justify-between">
                       <div className="flex items-center gap-4 text-sm">
                         <div className="flex items-center gap-2 text-slate-400">
@@ -688,11 +695,10 @@ export const Members: React.FC = () => {
                           </div>
                         )}
                       </div>
-                      <span className={`text-xs font-medium px-2.5 py-1 rounded-full ${
-                        member.status === 'Active' 
-                          ? 'bg-emerald-900/20 text-emerald-500 border border-emerald-900/30' 
+                      <span className={`text-xs font-medium px-2.5 py-1 rounded-full ${member.status === 'Active'
+                          ? 'bg-emerald-900/20 text-emerald-500 border border-emerald-900/30'
                           : 'bg-red-900/20 text-red-500 border border-red-900/30'
-                      }`}>
+                        }`}>
                         {member.status === 'Active' ? 'Đang làm việc' : 'Nghỉ việc'}
                       </span>
                     </div>
@@ -702,7 +708,7 @@ export const Members: React.FC = () => {
             </div>
           </div>
         ))}
-        
+
         {Object.keys(membersByDept).length === 0 && (
           <div className="bg-neutral-900 p-8 rounded-xl shadow-lg shadow-black/20 border border-neutral-800 text-center text-slate-500">
             Không tìm thấy nhân sự nào phù hợp với bộ lọc
@@ -712,4 +718,3 @@ export const Members: React.FC = () => {
     </div>
   );
 };
-

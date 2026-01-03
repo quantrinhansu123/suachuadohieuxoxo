@@ -1,14 +1,14 @@
 import React, { useState, useRef, useEffect, useMemo } from 'react';
 import { HashRouter, Routes, Route, Link, useLocation } from 'react-router-dom';
-import { 
-  LayoutDashboard, 
-  Users, 
-  ShoppingBag, 
-  Package, 
-  Wrench, 
-  Settings, 
-  Search, 
-  Bell, 
+import {
+  LayoutDashboard,
+  Users,
+  ShoppingBag,
+  Package,
+  Wrench,
+  Settings,
+  Search,
+  Bell,
   Menu,
   ChevronRight,
   LogOut,
@@ -30,28 +30,28 @@ import { Services } from './components/Services';
 import { Products } from './components/Products';
 import { Workflows } from './components/Workflows';
 import { Members } from './components/Members';
-import { Settings as SettingsPage } from './components/Settings'; 
-import { DEFAULT_COMPANY_CONFIG, MOCK_MEMBERS } from './constants'; 
+import { Settings as SettingsPage } from './components/Settings';
+import { DEFAULT_COMPANY_CONFIG, MOCK_MEMBERS } from './constants';
 import { AppProvider, useAppStore } from './context';
 import { Order, ServiceItem } from './types';
 import { ref, set, get, onValue } from 'firebase/database';
-import { db, DB_PATHS } from './firebase'; 
+import { db, DB_PATHS } from './firebase';
+
 
 // --- Sidebar Component ---
-const SidebarItem = ({ to, icon: Icon, label }: { to: string, icon: any, label: string }) => {
+const SidebarItem = ({ to, icon: Icon, label }: { to: string, icon?: any, label: string }) => {
   const location = useLocation();
   const isActive = location.pathname === to;
-  
+
   return (
-    <Link 
-      to={to} 
-      className={`flex items-center gap-3 px-4 py-3 rounded-xl transition-all duration-300 border ${
-        isActive 
-          ? 'bg-neutral-800 border-gold-900/50 text-gold-400 shadow-lg shadow-black/40' 
-          : 'border-transparent text-slate-500 hover:bg-neutral-900 hover:text-slate-300'
-      }`}
+    <Link
+      to={to}
+      className={`flex items-center gap-3 px-4 py-3 rounded-xl transition-all duration-300 border ${isActive
+        ? 'bg-neutral-800 border-gold-900/50 text-gold-400 shadow-lg shadow-black/40'
+        : 'border-transparent text-slate-500 hover:bg-neutral-900 hover:text-slate-300'
+        }`}
     >
-      <Icon size={20} className={isActive ? 'text-gold-500' : 'text-slate-600'} />
+      {Icon && <Icon size={20} className={isActive ? 'text-gold-500' : 'text-slate-600'} />}
       <span className="font-medium">{label}</span>
       {isActive && <ChevronRight size={16} className="ml-auto opacity-80 text-gold-600" />}
     </Link>
@@ -63,7 +63,7 @@ const Sidebar = () => (
     <div className="p-6">
       <div className="flex items-center gap-3">
         <div className="w-10 h-10 bg-gold-600 rounded-lg flex items-center justify-center text-black font-serif font-bold text-xl overflow-hidden shadow-lg shadow-gold-900/20">
-           {DEFAULT_COMPANY_CONFIG.logoUrl.includes('placeholder') ? 'X' : <img src={DEFAULT_COMPANY_CONFIG.logoUrl} alt="Logo" />}
+          {DEFAULT_COMPANY_CONFIG.logoUrl.includes('placeholder') ? 'X' : <img src={DEFAULT_COMPANY_CONFIG.logoUrl} alt="Logo" />}
         </div>
         <div>
           <h1 className="font-serif font-bold text-lg text-slate-100 tracking-tight leading-tight">{DEFAULT_COMPANY_CONFIG.name}</h1>
@@ -75,22 +75,22 @@ const Sidebar = () => (
     <nav className="flex-1 px-4 space-y-1 overflow-y-auto">
       <div className="text-xs font-semibold text-slate-600 uppercase tracking-wider px-4 mb-2 mt-4">Trung Tâm</div>
       <SidebarItem to="/" icon={LayoutDashboard} label="Tổng quan" />
-      
+
       <div className="text-xs font-semibold text-slate-600 uppercase tracking-wider px-4 mb-2 mt-6">Kinh Doanh</div>
       <SidebarItem to="/orders" icon={ShoppingBag} label="Đơn hàng" />
       <SidebarItem to="/customers" icon={Users} label="Khách hàng (CRM)" />
-      
+
       <div className="text-xs font-semibold text-slate-600 uppercase tracking-wider px-4 mb-2 mt-6">Quản Lý</div>
-      <SidebarItem to="/services" icon={Layers} label="Dịch vụ & Bảng giá" />
+      <SidebarItem to="/services" label="Dịch vụ & Bảng giá" />
       <SidebarItem to="/products" icon={Tag} label="Sản phẩm bán" />
       <SidebarItem to="/inventory" icon={Package} label="Kho vật tư" />
       <SidebarItem to="/members" icon={Briefcase} label="Nhân sự" />
-      
+
       <div className="text-xs font-semibold text-slate-600 uppercase tracking-wider px-4 mb-2 mt-6">Kỹ Thuật</div>
       <SidebarItem to="/workflows" icon={GitMerge} label="Quy trình xử lý" />
       <SidebarItem to="/kanban" icon={Columns} label="Bảng Kanban" />
       <SidebarItem to="/technician" icon={Wrench} label="Khu vực kỹ thuật" />
-      
+
       <div className="text-xs font-semibold text-slate-600 uppercase tracking-wider px-4 mb-2 mt-6">Hệ Thống</div>
       <SidebarItem to="/settings" icon={Settings} label="Cài đặt" />
     </nav>
@@ -111,10 +111,10 @@ const Header = () => {
   const [acknowledgedIds, setAcknowledgedIds] = useState<Set<string>>(new Set());
   const [isLoadingAcknowledged, setIsLoadingAcknowledged] = useState(true);
   const notificationRef = useRef<HTMLDivElement>(null);
-  
+
   // Simulate current user ID - in real app, get from auth context
   const CURRENT_USER_ID = 'admin'; // Có thể lấy từ auth context
-  
+
   // Load acknowledged IDs from Firebase
   useEffect(() => {
     const loadAcknowledgedIds = async () => {
@@ -141,9 +141,9 @@ const Header = () => {
         setIsLoadingAcknowledged(false);
       }
     };
-    
+
     loadAcknowledgedIds();
-    
+
     // Listen for real-time updates
     const notificationsRef = ref(db, `${DB_PATHS.NOTIFICATIONS}/${CURRENT_USER_ID}`);
     const unsubscribe = onValue(notificationsRef, (snapshot) => {
@@ -153,17 +153,17 @@ const Header = () => {
         setAcknowledgedIds(new Set(ids));
       }
     });
-    
+
     return () => unsubscribe();
   }, [CURRENT_USER_ID]);
-  
+
   // Save acknowledged IDs to Firebase
   const saveAcknowledgedIds = async (ids: Set<string>) => {
     try {
       const idsArray = Array.from(ids);
       // Lưu vào Firebase
       await set(ref(db, `${DB_PATHS.NOTIFICATIONS}/${CURRENT_USER_ID}`), idsArray);
-      
+
       // Backup vào localStorage
       try {
         localStorage.setItem('acknowledged_notifications', JSON.stringify(idsArray));
@@ -181,24 +181,24 @@ const Header = () => {
       }
     }
   };
-  
+
   // Simulate current user role - in real app, get from auth context
   const CURRENT_USER_ROLE = 'Kỹ thuật viên'; // Có thể là 'Kỹ thuật viên', 'QC', 'Spa', etc.
-  
+
   // Map role to stages they handle
   const ROLE_STAGES: Record<string, string[]> = {
     'Kỹ thuật viên': ['In Queue', 'Cleaning', 'Repairing'],
     'QC': ['QC'],
     'Spa': ['Cleaning'],
   };
-  
+
   // Get stages for current user
   const myStages = ROLE_STAGES[CURRENT_USER_ROLE] || ['In Queue', 'Cleaning', 'Repairing', 'QC'];
-  
+
   // Find orders with items returned to my stage
   const notifications = useMemo(() => {
     const notifs: Array<{ order: Order; item: ServiceItem }> = [];
-    
+
     orders.forEach(order => {
       order.items.forEach(item => {
         // Chỉ lấy các item không phải sản phẩm và đang ở công đoạn của tôi
@@ -211,10 +211,10 @@ const Header = () => {
         }
       });
     });
-    
+
     return notifs;
   }, [orders, myStages, acknowledgedIds]);
-  
+
   // Close notification panel when clicking outside
   useEffect(() => {
     const handleClickOutside = (event: MouseEvent) => {
@@ -225,41 +225,41 @@ const Header = () => {
     document.addEventListener('mousedown', handleClickOutside);
     return () => document.removeEventListener('mousedown', handleClickOutside);
   }, []);
-  
+
   const handleAcknowledge = async (orderId: string, itemId: string) => {
-    const newIds = new Set(acknowledgedIds);
+    const newIds = new Set<string>(acknowledgedIds);
     newIds.add(`${orderId}-${itemId}`);
     setAcknowledgedIds(newIds);
     await saveAcknowledgedIds(newIds);
   };
-  
+
   const handleAcknowledgeAll = async () => {
-    const newIds = new Set(acknowledgedIds);
+    const newIds = new Set<string>(acknowledgedIds);
     notifications.forEach(notif => {
       newIds.add(`${notif.order.id}-${notif.item.id}`);
     });
     setAcknowledgedIds(newIds);
     await saveAcknowledgedIds(newIds);
   };
-  
+
   const unreadCount = notifications.filter(n => !acknowledgedIds.has(`${n.order.id}-${n.item.id}`)).length;
-  
+
   return (
     <header className="h-16 bg-neutral-950/80 backdrop-blur-md border-b border-neutral-900 fixed top-0 right-0 left-64 z-10 px-8 flex items-center justify-between">
       <div className="flex items-center gap-4 w-96">
         <div className="relative w-full">
           <Search className="absolute left-3 top-1/2 -translate-y-1/2 text-slate-500" size={18} />
-          <input 
-            type="text" 
-            placeholder="Tìm kiếm đơn hàng, khách hàng..." 
+          <input
+            type="text"
+            placeholder="Tìm kiếm đơn hàng, khách hàng..."
             className="w-full pl-10 pr-4 py-2 bg-neutral-900 border border-neutral-800 rounded-full text-sm text-slate-200 focus:ring-1 focus:ring-gold-500 focus:border-gold-500 outline-none transition-all placeholder-slate-600"
           />
         </div>
       </div>
-      
+
       <div className="flex items-center gap-6">
         <div className="relative" ref={notificationRef}>
-          <button 
+          <button
             onClick={() => setShowNotifications(!showNotifications)}
             className="relative text-slate-400 hover:text-gold-400 transition-colors"
           >
@@ -270,7 +270,7 @@ const Header = () => {
               </span>
             )}
           </button>
-          
+
           {showNotifications && (
             <div className="absolute right-0 top-full mt-2 w-96 bg-neutral-900 border border-neutral-800 rounded-xl shadow-2xl z-50 max-h-[600px] overflow-hidden flex flex-col">
               <div className="p-4 border-b border-neutral-800 flex items-center justify-between bg-neutral-950">
@@ -284,7 +284,7 @@ const Header = () => {
                   </button>
                 )}
               </div>
-              
+
               <div className="overflow-y-auto flex-1">
                 {notifications.length === 0 ? (
                   <div className="p-8 text-center text-slate-500">
@@ -302,9 +302,9 @@ const Header = () => {
                         'QC': 'Kiểm Tra (QC)',
                         'Ready': 'Hoàn Thành'
                       };
-                      
+
                       return (
-                        <div 
+                        <div
                           key={`${notif.order.id}-${notif.item.id}-${idx}`}
                           className={`p-4 hover:bg-neutral-800 transition-colors ${isAcknowledged ? 'opacity-60' : ''}`}
                         >
@@ -354,7 +354,7 @@ const Header = () => {
             </div>
           )}
         </div>
-        
+
         <div className="flex items-center gap-3 pl-6 border-l border-neutral-800">
           <div className="text-right hidden sm:block">
             <p className="text-sm font-semibold text-slate-200">Quản trị viên</p>
@@ -376,7 +376,7 @@ const AppContent: React.FC = () => {
       <div className="min-h-screen bg-neutral-950 font-sans text-slate-300">
         <Sidebar />
         <Header />
-        
+
         <main className="ml-64 pt-24 px-8 pb-12">
           <Routes>
             <Route path="/" element={<Dashboard />} />
@@ -399,6 +399,9 @@ const AppContent: React.FC = () => {
             } />
           </Routes>
         </main>
+
+        {/* Data Cleanup Tool - Only visible in development */}
+
       </div>
     </HashRouter>
   );

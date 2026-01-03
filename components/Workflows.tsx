@@ -6,328 +6,527 @@ import { ref, set, remove, get, onValue } from 'firebase/database';
 import { db, DB_PATHS } from '../firebase';
 
 // Action Menu Component
-const ActionMenu: React.FC<{ 
-  onView: () => void;
-  onEdit: () => void;
-  onDelete: () => void;
-  itemName: string;
+const ActionMenu: React.FC<{
+   onView: () => void;
+   onEdit: () => void;
+   onDelete: () => void;
+   itemName: string;
 }> = ({ onView, onEdit, onDelete, itemName }) => {
-  const [isOpen, setIsOpen] = useState(false);
-  const menuRef = useRef<HTMLDivElement>(null);
+   const [isOpen, setIsOpen] = useState(false);
+   const menuRef = useRef<HTMLDivElement>(null);
 
-  useEffect(() => {
-    const handleClickOutside = (event: MouseEvent) => {
-      if (menuRef.current && !menuRef.current.contains(event.target as Node)) {
-        setIsOpen(false);
-      }
-    };
-    document.addEventListener('mousedown', handleClickOutside);
-    return () => document.removeEventListener('mousedown', handleClickOutside);
-  }, []);
+   useEffect(() => {
+      const handleClickOutside = (event: MouseEvent) => {
+         if (menuRef.current && !menuRef.current.contains(event.target as Node)) {
+            setIsOpen(false);
+         }
+      };
+      document.addEventListener('mousedown', handleClickOutside);
+      return () => document.removeEventListener('mousedown', handleClickOutside);
+   }, []);
 
-  return (
-    <div className="relative" ref={menuRef}>
-      <button
-        onClick={(e) => {
-          e.stopPropagation();
-          setIsOpen(!isOpen);
-        }}
-        className="p-2 hover:bg-neutral-800 rounded-lg text-slate-500 hover:text-slate-300 transition-colors"
-      >
-        <MoreHorizontal size={20} />
-      </button>
-      
-      {isOpen && (
-        <div className="absolute right-0 top-full mt-1 bg-neutral-800 border border-neutral-700 rounded-lg shadow-xl z-50 min-w-[140px] overflow-hidden">
-          <button
+   return (
+      <div className="relative" ref={menuRef}>
+         <button
             onClick={(e) => {
-              e.stopPropagation();
-              onView();
-              setIsOpen(false);
+               e.stopPropagation();
+               setIsOpen(!isOpen);
             }}
-            className="w-full px-4 py-2.5 text-left text-sm text-slate-300 hover:bg-neutral-700 flex items-center gap-2 transition-colors"
-          >
-            <Eye size={16} />
-            Xem
-          </button>
-          <button
-            onClick={(e) => {
-              e.stopPropagation();
-              onEdit();
-              setIsOpen(false);
-            }}
-            className="w-full px-4 py-2.5 text-left text-sm text-slate-300 hover:bg-neutral-700 flex items-center gap-2 transition-colors"
-          >
-            <Edit size={16} />
-            Sửa
-          </button>
-          <button
-            onClick={(e) => {
-              e.stopPropagation();
-              if (window.confirm(`Bạn có chắc chắn muốn xóa "${itemName}"?`)) {
-                onDelete();
-              }
-              setIsOpen(false);
-            }}
-            className="w-full px-4 py-2.5 text-left text-sm text-red-400 hover:bg-red-900/20 flex items-center gap-2 transition-colors"
-          >
-            <Trash2 size={16} />
-            Xóa
-          </button>
-        </div>
-      )}
-    </div>
-  );
+            className="p-2 hover:bg-neutral-800 rounded-lg text-slate-500 hover:text-slate-300 transition-colors"
+         >
+            <MoreHorizontal size={20} />
+         </button>
+
+         {isOpen && (
+            <div className="absolute right-0 top-full mt-1 bg-neutral-800 border border-neutral-700 rounded-lg shadow-xl z-50 min-w-[140px] overflow-hidden">
+               <button
+                  onClick={(e) => {
+                     e.stopPropagation();
+                     onView();
+                     setIsOpen(false);
+                  }}
+                  className="w-full px-4 py-2.5 text-left text-sm text-slate-300 hover:bg-neutral-700 flex items-center gap-2 transition-colors"
+               >
+                  <Eye size={16} />
+                  Xem
+               </button>
+               <button
+                  onClick={(e) => {
+                     e.stopPropagation();
+                     onEdit();
+                     setIsOpen(false);
+                  }}
+                  className="w-full px-4 py-2.5 text-left text-sm text-slate-300 hover:bg-neutral-700 flex items-center gap-2 transition-colors"
+               >
+                  <Edit size={16} />
+                  Sửa
+               </button>
+               <button
+                  onClick={(e) => {
+                     e.stopPropagation();
+                     if (window.confirm(`Bạn có chắc chắn muốn xóa "${itemName}"?`)) {
+                        onDelete();
+                     }
+                     setIsOpen(false);
+                  }}
+                  className="w-full px-4 py-2.5 text-left text-sm text-red-400 hover:bg-red-900/20 flex items-center gap-2 transition-colors"
+               >
+                  <Trash2 size={16} />
+                  Xóa
+               </button>
+            </div>
+         )}
+      </div>
+   );
 };
 
 // Helper to group workflows by department
 const groupBy = <T, K extends keyof any>(list: T[], getKey: (item: T) => K) =>
-  list.reduce((previous, currentItem) => {
-    const group = getKey(currentItem);
-    if (!previous[group]) previous[group] = [];
-    previous[group].push(currentItem);
-    return previous;
-  }, {} as Record<K, T[]>);
+   list.reduce((previous, currentItem) => {
+      const group = getKey(currentItem);
+      if (!previous[group]) previous[group] = [];
+      previous[group].push(currentItem);
+      return previous;
+   }, {} as Record<K, T[]>);
 
 // Helper to get department from member role
 const getDepartmentFromRole = (role: Member['role']): string => {
-  switch (role) {
-    case 'Quản lý': return 'Quản Lý';
-    case 'Kỹ thuật viên': return 'Kỹ Thuật';
-    case 'QC': return 'QA/QC';
-    case 'Tư vấn viên': return 'Kinh Doanh';
-    default: return 'Khác';
-  }
+   switch (role) {
+      case 'Quản lý': return 'Quản Lý';
+      case 'Kỹ thuật viên': return 'Kỹ Thuật';
+      case 'QC': return 'QA/QC';
+      case 'Tư vấn viên': return 'Kinh Doanh';
+      default: return 'Khác';
+   }
 };
 
 // Helper to get unique departments from members
 const getDepartmentsFromMembers = (): string[] => {
-  const departments = new Set<string>();
-  MOCK_MEMBERS.forEach(member => {
-    const dept = member.department || getDepartmentFromRole(member.role);
-    if (dept && dept !== 'Khác') {
-      departments.add(dept);
-    }
-  });
-  // Add default departments if not found in members
-  const defaultDepts = ['Kỹ Thuật', 'Spa', 'QA/QC', 'Hậu Cần', 'Quản Lý', 'Kinh Doanh'];
-  defaultDepts.forEach(dept => departments.add(dept));
-  return Array.from(departments).sort();
+   const departments = new Set<string>();
+   MOCK_MEMBERS.forEach(member => {
+      const dept = member.department || getDepartmentFromRole(member.role);
+      if (dept && dept !== 'Khác') {
+         departments.add(dept);
+      }
+   });
+   // Add default departments if not found in members
+   const defaultDepts = ['Kỹ Thuật', 'Spa', 'QA/QC', 'Hậu Cần', 'Quản Lý', 'Kinh Doanh'];
+   defaultDepts.forEach(dept => departments.add(dept));
+   return Array.from(departments).sort();
 };
 
 export const Workflows: React.FC = () => {
-  const [selectedWorkflow, setSelectedWorkflow] = useState<WorkflowDefinition | null>(null);
-  const [isConfigModalOpen, setIsConfigModalOpen] = useState(false);
-  const [showAddModal, setShowAddModal] = useState(false);
-  const [showViewModal, setShowViewModal] = useState(false);
-  const [workflows, setWorkflows] = useState<WorkflowDefinition[]>(MOCK_WORKFLOWS);
-  const [isLoading, setIsLoading] = useState(true);
+   const [selectedWorkflow, setSelectedWorkflow] = useState<WorkflowDefinition | null>(null);
+   const [isConfigModalOpen, setIsConfigModalOpen] = useState(false);
+   const [showAddModal, setShowAddModal] = useState(false);
+   const [showViewModal, setShowViewModal] = useState(false);
+   const [workflows, setWorkflows] = useState<WorkflowDefinition[]>([]);
+   const [isLoading, setIsLoading] = useState(true);
 
-  // Load workflows from Firebase
-  useEffect(() => {
-    const loadWorkflows = async () => {
-      try {
-        const snapshot = await get(ref(db, DB_PATHS.WORKFLOWS));
-        if (snapshot.exists()) {
-          const data = snapshot.val();
-          // Convert object to array and ensure all required fields
-          const workflowsList: WorkflowDefinition[] = Object.keys(data).map(key => {
-            const wf = data[key];
-            return {
-              id: wf.id || key,
-              label: wf.label || '',
-              description: wf.description || '',
-              department: wf.department || 'Kỹ Thuật',
-              types: wf.types || [],
-              color: wf.color || 'bg-blue-900/30 text-blue-400 border-blue-800',
-              materials: wf.materials || undefined,
-              stages: wf.stages || undefined,
-              assignedMembers: wf.assignedMembers || undefined
-            } as WorkflowDefinition;
-          });
-          setWorkflows(workflowsList);
-        } else {
-          // Nếu Firebase trống, dùng MOCK_WORKFLOWS
-          setWorkflows(MOCK_WORKFLOWS);
-        }
-      } catch (error) {
-        console.error('Error loading workflows:', error);
-        // Fallback to MOCK_WORKFLOWS on error
-        setWorkflows(MOCK_WORKFLOWS);
-      } finally {
-        setIsLoading(false);
-      }
-    };
+   // Load workflows from Firebase
+   useEffect(() => {
+      const loadWorkflows = async () => {
+         try {
+            const snapshot = await get(ref(db, DB_PATHS.WORKFLOWS));
+            if (snapshot.exists()) {
+               const data = snapshot.val();
+               // Convert object to array and ensure all required fields
+               const workflowsList: WorkflowDefinition[] = Object.keys(data).map(key => {
+                  const wf = data[key] as any;
+                  return {
+                     id: wf.id || key,
+                     label: wf.label || '',
+                     description: wf.description || '',
+                     department: wf.department || 'Kỹ Thuật',
+                     types: wf.types || [],
+                     color: wf.color || 'bg-blue-900/30 text-blue-400 border-blue-800',
+                     materials: wf.materials || undefined,
+                     stages: wf.stages || undefined,
+                     assignedMembers: wf.assignedMembers || undefined
+                  } as WorkflowDefinition;
+               });
+               setWorkflows(workflowsList);
+            } else {
+               // Nếu Firebase trống
+               setWorkflows([]);
+            }
+         } catch (error) {
+            console.error('Error loading workflows:', error);
+            // Set empty array on error
+            setWorkflows([]);
+         } finally {
+            setIsLoading(false);
+         }
+      };
 
-    loadWorkflows();
+      loadWorkflows();
 
-    // Listen for real-time updates
-    const workflowsRef = ref(db, DB_PATHS.WORKFLOWS);
-    const unsubscribe = onValue(workflowsRef, (snapshot) => {
-      try {
-        if (snapshot.exists()) {
-          const data = snapshot.val();
-          // Convert object to array and ensure all required fields
-          const workflowsList: WorkflowDefinition[] = Object.keys(data).map(key => {
-            const wf = data[key];
-            return {
-              id: wf.id || key,
-              label: wf.label || '',
-              description: wf.description || '',
-              department: wf.department || 'Kỹ Thuật',
-              types: wf.types || [],
-              color: wf.color || 'bg-blue-900/30 text-blue-400 border-blue-800',
-              materials: wf.materials || undefined,
-              stages: wf.stages || undefined,
-              assignedMembers: wf.assignedMembers || undefined
-            } as WorkflowDefinition;
-          });
-          setWorkflows(workflowsList);
-        } else {
-          setWorkflows(MOCK_WORKFLOWS);
-        }
-      } catch (error) {
-        console.error('Error in real-time listener:', error);
-        setWorkflows(MOCK_WORKFLOWS);
-      }
-    });
+      // Listen for real-time updates
+      const workflowsRef = ref(db, DB_PATHS.WORKFLOWS);
+      const unsubscribe = onValue(workflowsRef, (snapshot) => {
+         try {
+            if (snapshot.exists()) {
+               const data = snapshot.val();
+               // Convert object to array and ensure all required fields
+               const workflowsList: WorkflowDefinition[] = Object.keys(data).map(key => {
+                  const wf = data[key] as any;
+                  return {
+                     id: wf.id || key,
+                     label: wf.label || '',
+                     description: wf.description || '',
+                     department: wf.department || 'Kỹ Thuật',
+                     types: wf.types || [],
+                     color: wf.color || 'bg-blue-900/30 text-blue-400 border-blue-800',
+                     materials: wf.materials || undefined,
+                     stages: wf.stages || undefined,
+                     assignedMembers: wf.assignedMembers || undefined
+                  } as WorkflowDefinition;
+               });
+               setWorkflows(workflowsList);
+            } else {
+               setWorkflows([]);
+            }
+         } catch (error) {
+            console.error('Error in real-time listener:', error);
+            setWorkflows([]);
+         }
+      });
 
-    return () => unsubscribe();
-  }, []);
+      return () => unsubscribe();
+   }, []);
 
-  const workflowsByDept = groupBy(workflows, (wf) => wf.department);
+   // Group workflows by department with explicit type
+   const workflowsByDept = groupBy(workflows, (wf: WorkflowDefinition) => wf.department);
 
-  const handleOpenConfig = (wf: WorkflowDefinition) => {
-    setSelectedWorkflow(wf);
-    setIsConfigModalOpen(true);
-  };
+   const handleOpenConfig = (wf: WorkflowDefinition) => {
+      setSelectedWorkflow(wf);
+      setIsConfigModalOpen(true);
+   };
 
 
-  return (
-    <div className="space-y-6">
-      {/* Modal Tạo Quy Trình Mới */}
-      {showAddModal && (
-        <CreateWorkflowModal 
-          onClose={() => setShowAddModal(false)}
-          onSuccess={() => {
-            // Workflows will be updated automatically via Firebase listener
-          }}
-        />
-      )}
-      
-      <div className="flex flex-col sm:flex-row justify-between items-start sm:items-center gap-4">
-        <div>
-          <h1 className="text-2xl font-serif font-bold text-slate-100">Quản Lý Quy Trình</h1>
-          <p className="text-slate-500 mt-1">Thiết lập các luồng xử lý và định mức nguyên vật liệu.</p>
-        </div>
-        <button 
-          onClick={() => setShowAddModal(true)}
-          className="flex items-center gap-2 bg-gold-600 hover:bg-gold-700 text-black font-medium px-4 py-2.5 rounded-lg shadow-lg shadow-gold-900/20 transition-all"
-        >
-          <Plus size={18} />
-          <span>Tạo Quy Trình Mới</span>
-        </button>
-      </div>
+   return (
+      <div className="space-y-6">
+         {/* Modal Tạo Quy Trình Mới */}
+         {showAddModal && (
+            <CreateWorkflowModal
+               onClose={() => setShowAddModal(false)}
+               onSuccess={() => {
+                  // Workflows will be updated automatically via Firebase listener
+               }}
+            />
+         )}
 
-      <div className="space-y-8">
-        {Object.entries(workflowsByDept).map(([dept, workflows]) => (
-          <div key={dept}>
-            <h3 className="flex items-center gap-2 text-lg font-bold text-slate-100 mb-4 px-1">
-              <Building2 size={20} className="text-gold-500" />
-              <span>Phòng {dept}</span>
-              <span className="text-xs font-normal text-slate-400 bg-neutral-800 border border-neutral-700 px-2 py-0.5 rounded-full">{workflows.length} quy trình</span>
-            </h3>
-            
-            <div className="grid grid-cols-1 gap-1.5">
-              {workflows.map((wf) => (
-                <div key={wf.id} className="bg-neutral-900 px-2 py-1.5 rounded-md shadow-sm border border-neutral-800 flex gap-2 items-center hover:border-gold-900/30 transition-all">
-                  <div className={`w-8 h-8 rounded flex items-center justify-center border flex-shrink-0 ${wf.color}`}>
-                    <GitMerge size={14} />
-                  </div>
-                  <div className="flex-1 min-w-0">
-                    <div className="flex justify-between items-center gap-1">
-                      <div className="flex items-center gap-2 min-w-0 flex-1">
-                        <h3 className="font-semibold text-xs text-slate-100 truncate">{wf.label}</h3>
-                        <span className="text-[9px] font-mono text-slate-600 flex-shrink-0">{wf.id}</span>
-                        <span className="text-[9px] text-slate-400 bg-neutral-800 px-1 py-0.5 rounded border border-neutral-700 flex-shrink-0">{wf.department}</span>
-                      </div>
-                      <ActionMenu
-                        itemName={wf.label}
-                        onView={() => {
-                          setSelectedWorkflow(wf);
-                          setShowViewModal(true);
-                        }}
-                        onEdit={() => {
-                          handleOpenConfig(wf);
-                        }}
-                        onDelete={async () => {
-                          if (window.confirm(`Bạn có chắc chắn muốn xóa quy trình "${wf.label}"?\n\nHành động này không thể hoàn tác!`)) {
-                            try {
-                              // Xóa từ Firebase với tên bảng tiếng Việt
-                              await remove(ref(db, `${DB_PATHS.WORKFLOWS}/${wf.id}`));
-                              alert(`Đã xóa quy trình: ${wf.label}\n\nĐã xóa khỏi Firebase!`);
-                              // Workflows will be updated automatically via Firebase listener
-                            } catch (error: any) {
-                              console.error('Lỗi khi xóa quy trình:', error);
-                              const errorMessage = error?.message || String(error);
-                              alert('Lỗi khi xóa quy trình: ' + errorMessage);
-                            }
-                          }
-                        }}
-                      />
-                    </div>
-                    <div className="flex items-center gap-2 text-[9px] text-slate-500">
-                      <span>{wf.types.length > 0 ? wf.types.join(', ') : 'Tất cả'}</span>
-                      {wf.materials && wf.materials.length > 0 && (
-                        <span className="flex items-center gap-0.5"><Package size={9} />{wf.materials.length}</span>
-                      )}
-                      {wf.stages && wf.stages.length > 0 && (
-                        <span className="flex items-center gap-0.5"><Columns size={9} />{wf.stages.length}</span>
-                      )}
-                      <span className="text-slate-600">|</span>
-                      {wf.stages && wf.stages.length > 0 && (
-                        <span className="text-slate-400 truncate">
-                          {wf.stages.map((s, i) => `#${i+1} ${s.name}`).join(' → ')}
-                        </span>
-                      )}
-                    </div>
-                  </div>
-                </div>
-              ))}
-              
-              {/* Add New Placeholder */}
-              <button 
-                onClick={() => setShowAddModal(true)}
-                className="bg-neutral-900/50 rounded-md border border-dashed border-neutral-800 flex items-center justify-center py-1.5 text-slate-600 hover:border-gold-600/50 hover:text-gold-500 hover:bg-neutral-900 transition-colors text-xs"
-              >
-                <Plus size={20} className="mr-2" />
-                <span className="font-medium">Thêm quy trình {dept}</span>
-              </button>
+         <div className="flex flex-col sm:flex-row justify-between items-start sm:items-center gap-4">
+            <div>
+               <h1 className="text-2xl font-serif font-bold text-slate-100">Quản Lý Quy Trình</h1>
+               <p className="text-slate-500 mt-1">Thiết lập các luồng xử lý và định mức nguyên vật liệu.</p>
             </div>
-          </div>
-        ))}
+            <button
+               onClick={() => setShowAddModal(true)}
+               className="flex items-center gap-2 bg-gold-600 hover:bg-gold-700 text-black font-medium px-4 py-2.5 rounded-lg shadow-lg shadow-gold-900/20 transition-all"
+            >
+               <Plus size={18} />
+               <span>Tạo Quy Trình Mới</span>
+            </button>
+         </div>
+
+         <div className="grid grid-cols-1 md:grid-cols-2 xl:grid-cols-3 gap-4">
+            {Object.entries(workflowsByDept).map(([dept, workflows]) => (
+               <div key={dept} className="bg-neutral-900/30 rounded-lg border border-neutral-800 p-3">
+                  <h3 className="flex items-center gap-2 text-sm font-bold text-slate-100 mb-2">
+                     <Building2 size={16} className="text-gold-500" />
+                     <span>Phòng {dept}</span>
+                     <span className="text-[10px] font-normal text-slate-400 bg-neutral-800 border border-neutral-700 px-1.5 py-0.5 rounded-full">{workflows.length}</span>
+                  </h3>
+
+                  <div className="space-y-1">
+                     {workflows.map((wf) => (
+                        <div key={wf.id} className="bg-neutral-900 px-2 py-1.5 rounded-md shadow-sm border border-neutral-800 flex gap-2 items-center hover:border-gold-900/30 transition-all">
+                           <div className={`w-8 h-8 rounded flex items-center justify-center border flex-shrink-0 ${wf.color}`}>
+                              <GitMerge size={14} />
+                           </div>
+                           <div className="flex-1 min-w-0">
+                              <div className="flex justify-between items-center gap-1">
+                                 <div className="flex items-center gap-2 min-w-0 flex-1">
+                                    <h3 className="font-semibold text-xs text-slate-100 truncate">{wf.label}</h3>
+                                    <span className="text-[9px] font-mono text-slate-600 flex-shrink-0">{wf.id}</span>
+                                    <span className="text-[9px] text-slate-400 bg-neutral-800 px-1 py-0.5 rounded border border-neutral-700 flex-shrink-0">{wf.department}</span>
+                                 </div>
+                                 <ActionMenu
+                                    itemName={wf.label}
+                                    onView={() => {
+                                       setSelectedWorkflow(wf);
+                                       setShowViewModal(true);
+                                    }}
+                                    onEdit={() => {
+                                       handleOpenConfig(wf);
+                                    }}
+                                    onDelete={async () => {
+                                       if (window.confirm(`Bạn có chắc chắn muốn xóa quy trình "${wf.label}"?\n\nHành động này không thể hoàn tác!`)) {
+                                          try {
+                                             // Xóa từ Firebase với tên bảng tiếng Việt
+                                             await remove(ref(db, `${DB_PATHS.WORKFLOWS}/${wf.id}`));
+                                             alert(`Đã xóa quy trình: ${wf.label}\n\nĐã xóa khỏi Firebase!`);
+                                             // Workflows will be updated automatically via Firebase listener
+                                          } catch (error: any) {
+                                             console.error('Lỗi khi xóa quy trình:', error);
+                                             const errorMessage = error?.message || String(error);
+                                             alert('Lỗi khi xóa quy trình: ' + errorMessage);
+                                          }
+                                       }
+                                    }}
+                                 />
+                              </div>
+                              <div className="flex items-center gap-2 text-[9px] text-slate-500">
+                                 <span>{wf.types.length > 0 ? wf.types.join(', ') : 'Tất cả'}</span>
+                                 {wf.materials && wf.materials.length > 0 && (
+                                    <span className="flex items-center gap-0.5"><Package size={9} />{wf.materials.length}</span>
+                                 )}
+                                 {wf.stages && wf.stages.length > 0 && (
+                                    <span className="flex items-center gap-0.5"><Columns size={9} />{wf.stages.length}</span>
+                                 )}
+                                 <span className="text-slate-600">|</span>
+                                 {wf.stages && wf.stages.length > 0 && (
+                                    <span className="text-slate-400 truncate">
+                                       {wf.stages.map((s, i) => `#${i + 1} ${s.name}`).join(' → ')}
+                                    </span>
+                                 )}
+                              </div>
+                           </div>
+                        </div>
+                     ))}
+
+                     {/* Add New Placeholder */}
+                     <button
+                        onClick={() => setShowAddModal(true)}
+                        className="bg-neutral-900/50 rounded-md border border-dashed border-neutral-800 flex items-center justify-center py-1.5 text-slate-600 hover:border-gold-600/50 hover:text-gold-500 hover:bg-neutral-900 transition-colors text-xs"
+                     >
+                        <Plus size={20} className="mr-2" />
+                        <span className="font-medium">Thêm quy trình {dept}</span>
+                     </button>
+                  </div>
+               </div>
+            ))}
+         </div>
+
+         {/* Configuration Modal */}
+         {isConfigModalOpen && selectedWorkflow && (
+            <WorkflowConfigModal
+               workflow={selectedWorkflow}
+               onClose={() => setIsConfigModalOpen(false)}
+            />
+         )}
+
+         {/* View Modal */}
+         {showViewModal && selectedWorkflow && (
+            <WorkflowViewModal
+               workflow={selectedWorkflow}
+               onClose={() => {
+                  setShowViewModal(false);
+                  setSelectedWorkflow(null);
+               }}
+            />
+         )}
       </div>
+   );
+};
 
-      {/* Configuration Modal */}
-      {isConfigModalOpen && selectedWorkflow && (
-        <WorkflowConfigModal 
-           workflow={selectedWorkflow} 
-           onClose={() => setIsConfigModalOpen(false)} 
-        />
-      )}
+// --- Sub-component: Stage Item ---
+const StageItem: React.FC<{
+   stage: WorkflowStage;
+   idx: number;
+   stages: WorkflowStage[];
+   setStages: React.Dispatch<React.SetStateAction<WorkflowStage[]>>;
+}> = ({ stage, idx, stages, setStages }) => {
+   const [showTodoInput, setShowTodoInput] = useState(false);
+   const [newTodoText, setNewTodoText] = useState('');
+   const stageTodos = stage.todos || [];
 
-      {/* View Modal */}
-      {showViewModal && selectedWorkflow && (
-        <WorkflowViewModal 
-           workflow={selectedWorkflow} 
-           onClose={() => {
-             setShowViewModal(false);
-             setSelectedWorkflow(null);
-           }} 
-        />
-      )}
-    </div>
-  );
+   return (
+      <div className="bg-neutral-900 border border-neutral-800 rounded overflow-hidden">
+         {/* Header Row - Table-like */}
+         <div className="grid grid-cols-12 gap-2 p-2 bg-neutral-800/50 items-center text-xs">
+            <div className="col-span-1 flex items-center gap-1">
+               <GripVertical size={14} className="text-slate-600 cursor-move" />
+               <div className={`w-2 h-2 rounded-full ${stage.color || 'bg-slate-500'}`}></div>
+            </div>
+            <div className="col-span-2 font-medium text-slate-200">
+               {idx + 1}. {stage.name}
+            </div>
+            <div className="col-span-3 text-slate-400">
+               {stage.details || <span className="italic text-slate-600">Chưa có chi tiết</span>}
+            </div>
+            <div className="col-span-3 text-slate-400">
+               {stage.standards || <span className="italic text-slate-600">Chưa có tiêu chuẩn</span>}
+            </div>
+            <div className="col-span-2 text-slate-500 text-center">
+               {stageTodos.length > 0 && (
+                  <span className="bg-neutral-700 px-2 py-0.5 rounded">
+                     {stageTodos.filter(t => t.completed).length}/{stageTodos.length} task
+                  </span>
+               )}
+            </div>
+            <div className="col-span-1 flex items-center justify-end gap-1">
+               {idx > 0 && (
+                  <button
+                     onClick={() => {
+                        const newStages = [...stages];
+                        [newStages[idx], newStages[idx - 1]] = [newStages[idx - 1], newStages[idx]];
+                        newStages[idx].order = idx;
+                        newStages[idx - 1].order = idx - 1;
+                        setStages(newStages);
+                     }}
+                     className="p-1 hover:bg-neutral-700 rounded text-slate-500 hover:text-slate-300"
+                     title="Di chuyển lên"
+                  >
+                     <ArrowUp size={12} />
+                  </button>
+               )}
+               {idx < stages.length - 1 && (
+                  <button
+                     onClick={() => {
+                        const newStages = [...stages];
+                        [newStages[idx], newStages[idx + 1]] = [newStages[idx + 1], newStages[idx]];
+                        newStages[idx].order = idx;
+                        newStages[idx + 1].order = idx + 1;
+                        setStages(newStages);
+                     }}
+                     className="p-1 hover:bg-neutral-700 rounded text-slate-500 hover:text-slate-300"
+                     title="Di chuyển xuống"
+                  >
+                     <ArrowDown size={12} />
+                  </button>
+               )}
+               <button
+                  onClick={() => {
+                     if (window.confirm(`Xóa bước "${stage.name}"?`)) {
+                        setStages(stages.filter(s => s.id !== stage.id).map((s, i) => ({ ...s, order: i })));
+                     }
+                  }}
+                  className="p-1 hover:bg-neutral-700 rounded text-slate-500 hover:text-red-500"
+               >
+                  <X size={12} />
+               </button>
+            </div>
+         </div>
+
+         {/* Tasks Section */}
+         <div className="p-2 pt-0">
+            <div className="flex items-center justify-between mb-1 mt-2">
+               <p className="text-[10px] font-medium text-slate-500 uppercase">Các task con</p>
+               <button
+                  onClick={() => setShowTodoInput(!showTodoInput)}
+                  className="text-[10px] px-1.5 py-0.5 bg-gold-600/20 hover:bg-gold-600/30 text-gold-400 rounded flex items-center gap-1 transition-colors"
+               >
+                  <Plus size={10} />
+                  Thêm
+               </button>
+            </div>
+
+            {showTodoInput && (
+               <div className="flex gap-1 mb-1">
+                  <input
+                     type="text"
+                     value={newTodoText}
+                     onChange={(e) => setNewTodoText(e.target.value)}
+                     onKeyPress={(e) => {
+                        if (e.key === 'Enter' && newTodoText.trim()) {
+                           const newTodo: TodoStep = {
+                              id: `todo-${Date.now()}`,
+                              title: newTodoText,
+                              completed: false,
+                              order: stageTodos.length
+                           };
+                           const updatedStages = stages.map(s =>
+                              s.id === stage.id
+                                 ? { ...s, todos: [...(s.todos || []), newTodo] }
+                                 : s
+                           );
+                           setStages(updatedStages);
+                           setNewTodoText('');
+                           setShowTodoInput(false);
+                        }
+                     }}
+                     placeholder="Tên task..."
+                     className="flex-1 px-2 py-1 text-[11px] border border-neutral-700 rounded bg-neutral-800 text-slate-200 outline-none focus:border-gold-500"
+                     autoFocus
+                  />
+                  <button
+                     onClick={() => {
+                        if (newTodoText.trim()) {
+                           const newTodo: TodoStep = {
+                              id: `todo-${Date.now()}`,
+                              title: newTodoText,
+                              completed: false,
+                              order: stageTodos.length
+                           };
+                           const updatedStages = stages.map(s =>
+                              s.id === stage.id
+                                 ? { ...s, todos: [...(s.todos || []), newTodo] }
+                                 : s
+                           );
+                           setStages(updatedStages);
+                           setNewTodoText('');
+                           setShowTodoInput(false);
+                        }
+                     }}
+                     className="px-2 py-1 bg-gold-600 hover:bg-gold-700 text-black rounded text-[11px] font-medium transition-colors"
+                  >
+                     OK
+                  </button>
+               </div>
+            )}
+
+            {stageTodos.length === 0 ? (
+               <p className="text-[10px] text-slate-600 italic py-1">Chưa có task</p>
+            ) : (
+               <div className="space-y-0.5">
+                  {stageTodos.map(todo => (
+                     <div key={todo.id} className="flex items-center gap-1.5 text-[11px] p-1 bg-neutral-800/30 rounded">
+                        <button
+                           onClick={() => {
+                              const updatedStages = stages.map(s =>
+                                 s.id === stage.id
+                                    ? {
+                                       ...s, todos: (s.todos || []).map(t =>
+                                          t.id === todo.id ? { ...t, completed: !t.completed } : t
+                                       )
+                                    }
+                                    : s
+                              );
+                              setStages(updatedStages);
+                           }}
+                           className="flex-shrink-0"
+                        >
+                           {todo.completed ? (
+                              <CheckCircle2 size={12} className="text-emerald-500" />
+                           ) : (
+                              <Circle size={12} className="text-slate-600" />
+                           )}
+                        </button>
+                        <span className={`flex-1 ${todo.completed ? 'text-slate-500 line-through' : 'text-slate-300'}`}>
+                           {todo.title}
+                        </span>
+                        <button
+                           onClick={() => {
+                              const updatedStages = stages.map(s =>
+                                 s.id === stage.id
+                                    ? { ...s, todos: (s.todos || []).filter(t => t.id !== todo.id).map((t, i) => ({ ...t, order: i })) }
+                                    : s
+                              );
+                              setStages(updatedStages);
+                           }}
+                           className="text-slate-600 hover:text-red-500 transition-colors"
+                        >
+                           <X size={10} />
+                        </button>
+                     </div>
+                  ))}
+               </div>
+            )}
+         </div>
+      </div>
+   );
 };
 
 // --- Sub-component: Create Workflow Modal ---
@@ -345,7 +544,7 @@ const CreateWorkflowModal: React.FC<{ onClose: () => void; onSuccess?: () => voi
    const [newStageStandards, setNewStageStandards] = useState('');
    const [assignedMembers, setAssignedMembers] = useState<string[]>([]);
    const [memberSearchText, setMemberSearchText] = useState('');
-   
+
    // Tự động tạo ID từ tên quy trình
    const generateWorkflowId = (label: string): string => {
       if (!label) return '';
@@ -358,7 +557,7 @@ const CreateWorkflowModal: React.FC<{ onClose: () => void; onSuccess?: () => voi
          .replace(/_+/g, '_') // Loại bỏ gạch dưới trùng lặp
          .replace(/^_|_$/g, ''); // Loại bỏ gạch dưới ở đầu và cuối
    };
-   
+
    const workflowId = generateWorkflowId(workflowLabel);
 
    const getInventoryItem = (id: string) => MOCK_INVENTORY.find(i => i.id === id);
@@ -381,19 +580,22 @@ const CreateWorkflowModal: React.FC<{ onClose: () => void; onSuccess?: () => voi
    };
 
    const handleSave = async () => {
+      console.log('handleSave called');
       if (!workflowLabel) {
          alert('Vui lòng nhập tên quy trình!');
          return;
       }
-      
+
       const autoGeneratedId = generateWorkflowId(workflowLabel);
+      console.log('Generated ID:', autoGeneratedId);
       if (!autoGeneratedId) {
          alert('Không thể tạo ID từ tên quy trình. Vui lòng nhập tên hợp lệ!');
          return;
       }
-      
+
       // Kiểm tra ID đã tồn tại chưa
       try {
+         console.log('Checking existing workflow...');
          const existingSnapshot = await get(ref(db, `${DB_PATHS.WORKFLOWS}/${autoGeneratedId}`));
          if (existingSnapshot.exists()) {
             if (!window.confirm(`Quy trình với ID "${autoGeneratedId}" đã tồn tại. Bạn có muốn ghi đè không?`)) {
@@ -403,8 +605,9 @@ const CreateWorkflowModal: React.FC<{ onClose: () => void; onSuccess?: () => voi
       } catch (error) {
          console.error('Error checking existing workflow:', error);
       }
-      
+
       try {
+         console.log('Creating workflow object...');
          // Tự động chọn màu dựa trên phòng ban
          const departmentColors: Record<string, string> = {
             'Kỹ Thuật': 'bg-blue-900/30 text-blue-400 border-blue-800',
@@ -412,7 +615,7 @@ const CreateWorkflowModal: React.FC<{ onClose: () => void; onSuccess?: () => voi
             'QA/QC': 'bg-emerald-900/30 text-emerald-400 border-emerald-800',
             'Hậu Cần': 'bg-orange-900/30 text-orange-400 border-orange-800'
          };
-         
+
          // Tạo đối tượng quy trình (không dùng undefined cho Firebase)
          const newWorkflow: any = {
             id: autoGeneratedId,
@@ -422,7 +625,7 @@ const CreateWorkflowModal: React.FC<{ onClose: () => void; onSuccess?: () => voi
             types: [], // Có thể thêm sau
             color: departmentColors[workflowDepartment] || 'bg-blue-900/30 text-blue-400 border-blue-800'
          };
-         
+
          // Chỉ thêm materials và stages nếu có giá trị (không phải undefined)
          if (materials.length > 0) {
             newWorkflow.materials = materials;
@@ -433,12 +636,16 @@ const CreateWorkflowModal: React.FC<{ onClose: () => void; onSuccess?: () => voi
          if (assignedMembers.length > 0) {
             newWorkflow.assignedMembers = assignedMembers;
          }
-         
+
+         console.log('Saving workflow to Firebase:', newWorkflow);
+         console.log('Path:', `${DB_PATHS.WORKFLOWS}/${autoGeneratedId}`);
+
          // Lưu vào Firebase với tên bảng tiếng Việt
          await set(ref(db, `${DB_PATHS.WORKFLOWS}/${autoGeneratedId}`), newWorkflow);
-         
+
+         console.log('Workflow saved successfully!');
          alert(`Tạo quy trình thành công!\n\nID: ${autoGeneratedId}\nTên: ${workflowLabel}\nPhòng ban: ${workflowDepartment}\nVật tư: ${materials.length} loại\nCác bước: ${stages.length} bước\n\nĐã lưu vào Firebase!`);
-         
+
          // Reset form
          setWorkflowLabel('');
          setWorkflowDescription('');
@@ -447,12 +654,12 @@ const CreateWorkflowModal: React.FC<{ onClose: () => void; onSuccess?: () => voi
          setStages([]);
          setAssignedMembers([]);
          setMemberSearchText('');
-         
+
          // Call onSuccess callback to refresh workflows list
          if (onSuccess) {
             onSuccess();
          }
-         
+
          onClose();
       } catch (error: any) {
          console.error('Lỗi khi lưu quy trình:', error);
@@ -477,8 +684,8 @@ const CreateWorkflowModal: React.FC<{ onClose: () => void; onSuccess?: () => voi
             <div className="flex-1 overflow-y-auto p-6 space-y-6">
                {/* 1. General Info */}
                <div>
-                  <h4 className="font-bold text-slate-200 mb-4">Thông Tin Cơ Bản</h4>
-                  <div className="space-y-4">
+                  <h4 className="font-bold text-slate-200 mb-2 text-sm">Thông Tin Cơ Bản</h4>
+                  <div className="space-y-2">
                      <div>
                         <label className="text-xs font-medium text-slate-500 mb-1 block">Tên quy trình <span className="text-red-500">*</span></label>
                         <input
@@ -508,7 +715,7 @@ const CreateWorkflowModal: React.FC<{ onClose: () => void; onSuccess?: () => voi
                                  return memberDept === dept;
                               });
                               // Cập nhật assignedMembers chỉ giữ lại những người thuộc phòng ban mới
-                              setAssignedMembers(prev => prev.filter(id => 
+                              setAssignedMembers(prev => prev.filter(id =>
                                  membersInDept.some(m => m.id === id)
                               ));
                            }}
@@ -538,7 +745,7 @@ const CreateWorkflowModal: React.FC<{ onClose: () => void; onSuccess?: () => voi
                      <Users size={18} className="text-gold-500" />
                      Nhân Sự Phụ Trách
                   </h4>
-                  
+
                   <div className="bg-neutral-800/30 p-4 rounded-lg border border-neutral-800">
                      <div className="mb-3">
                         <label className="text-xs font-medium text-slate-500 mb-2 block">Tìm kiếm nhân sự</label>
@@ -550,13 +757,13 @@ const CreateWorkflowModal: React.FC<{ onClose: () => void; onSuccess?: () => voi
                            className="w-full p-2 border border-neutral-700 rounded text-sm outline-none focus:border-gold-500 bg-neutral-900 text-slate-200"
                         />
                      </div>
-                     
+
                      <div className="max-h-48 overflow-y-auto space-y-2">
                         {MOCK_MEMBERS
                            .filter(m => {
                               const memberDept = m.department || getDepartmentFromRole(m.role);
                               const matchesDept = memberDept === workflowDepartment;
-                              const matchesSearch = !memberSearchText.trim() || 
+                              const matchesSearch = !memberSearchText.trim() ||
                                  m.name.toLowerCase().includes(memberSearchText.toLowerCase()) ||
                                  m.phone.includes(memberSearchText) ||
                                  m.email.toLowerCase().includes(memberSearchText.toLowerCase());
@@ -589,12 +796,12 @@ const CreateWorkflowModal: React.FC<{ onClose: () => void; onSuccess?: () => voi
                            const memberDept = m.department || getDepartmentFromRole(m.role);
                            return memberDept === workflowDepartment && m.status === 'Active';
                         }).length === 0 && (
-                           <div className="text-center py-4 text-slate-600 text-sm">
-                              Không có nhân sự nào trong phòng ban này
-                           </div>
-                        )}
+                              <div className="text-center py-4 text-slate-600 text-sm">
+                                 Không có nhân sự nào trong phòng ban này
+                              </div>
+                           )}
                      </div>
-                     
+
                      {assignedMembers.length > 0 && (
                         <div className="mt-3 pt-3 border-t border-neutral-800">
                            <div className="text-xs font-medium text-slate-400 mb-2">Đã chọn ({assignedMembers.length}):</div>
@@ -625,77 +832,82 @@ const CreateWorkflowModal: React.FC<{ onClose: () => void; onSuccess?: () => voi
 
                {/* 2. Stages Configuration */}
                <div>
-                  <h4 className="font-bold text-slate-200 mb-4 flex items-center gap-2">
-                     <Columns size={18} className="text-gold-500" />
-                     Các Bước Xử Lý (Hiển thị ở Kanban)
+                  <h4 className="font-bold text-slate-200 mb-2 flex items-center gap-2 text-sm">
+                     <Columns size={16} className="text-gold-500" />
+                     Các Bước Xử Lý
                   </h4>
-                  
-                  <div className="bg-neutral-800/30 p-4 rounded-lg border border-neutral-800 mb-4">
-                     <div className="grid grid-cols-1 gap-3 mb-3">
-                        <div className="grid grid-cols-1 md:grid-cols-2 gap-3">
-                           <div>
-                              <label className="text-xs font-medium text-slate-500 mb-1 block">Tên bước <span className="text-red-500">*</span></label>
-                              <input
-                                 type="text"
-                                 value={newStageName}
-                                 onChange={(e) => setNewStageName(e.target.value)}
-                                 placeholder="VD: Vệ sinh, Sửa chữa, Kiểm tra..."
-                                 className="w-full p-2 border border-neutral-700 rounded text-sm outline-none focus:border-gold-500 bg-neutral-900 text-slate-200"
-                              />
-                           </div>
-                           <div>
-                              <label className="text-xs font-medium text-slate-500 mb-1 block">Màu sắc</label>
-                              <select
-                                 value={newStageColor}
-                                 onChange={(e) => setNewStageColor(e.target.value)}
-                                 className="w-full p-2 border border-neutral-700 rounded text-sm outline-none focus:border-gold-500 bg-neutral-900 text-slate-200"
-                              >
-                                 <option value="bg-slate-500">Xám</option>
-                                 <option value="bg-blue-500">Xanh dương</option>
-                                 <option value="bg-orange-500">Cam</option>
-                                 <option value="bg-purple-500">Tím</option>
-                                 <option value="bg-emerald-500">Xanh lá</option>
-                                 <option value="bg-red-500">Đỏ</option>
-                                 <option value="bg-yellow-500">Vàng</option>
-                                 <option value="bg-pink-500">Hồng</option>
-                              </select>
-                           </div>
+
+                  <div className="bg-neutral-800/30 p-3 rounded-lg border border-neutral-800 mb-3">
+                     <div className="grid grid-cols-2 gap-2 mb-2">
+                        <div>
+                           <label className="text-xs font-medium text-slate-500 mb-1 block">Tên bước <span className="text-red-500">*</span></label>
+                           <input
+                              type="text"
+                              value={newStageName}
+                              onChange={(e) => setNewStageName(e.target.value)}
+                              placeholder="VD: Vệ sinh, Sửa chữa..."
+                              className="w-full p-1.5 border border-neutral-700 rounded text-sm outline-none focus:border-gold-500 bg-neutral-900 text-slate-200"
+                           />
                         </div>
-                        <div className="grid grid-cols-1 md:grid-cols-2 gap-3">
-                           <div>
-                              <label className="text-xs font-medium text-slate-500 mb-1 block">Chi tiết</label>
-                              <textarea
-                                 value={newStageDetails}
-                                 onChange={(e) => setNewStageDetails(e.target.value)}
-                                 placeholder="Mô tả chi tiết công việc cần làm..."
-                                 rows={2}
-                                 className="w-full p-2 border border-neutral-700 rounded text-sm outline-none focus:border-gold-500 bg-neutral-900 text-slate-200 resize-none"
-                              />
-                           </div>
-                           <div>
-                              <label className="text-xs font-medium text-slate-500 mb-1 block">Tiêu chuẩn</label>
-                              <textarea
-                                 value={newStageStandards}
-                                 onChange={(e) => setNewStageStandards(e.target.value)}
-                                 placeholder="Tiêu chuẩn đánh giá hoàn thành..."
-                                 rows={2}
-                                 className="w-full p-2 border border-neutral-700 rounded text-sm outline-none focus:border-gold-500 bg-neutral-900 text-slate-200 resize-none"
-                              />
-                           </div>
+                        <div>
+                           <label className="text-xs font-medium text-slate-500 mb-1 block">Màu sắc</label>
+                           <select
+                              value={newStageColor}
+                              onChange={(e) => setNewStageColor(e.target.value)}
+                              className="w-full p-1.5 border border-neutral-700 rounded text-sm outline-none focus:border-gold-500 bg-neutral-900 text-slate-200"
+                           >
+                              <option value="bg-slate-500">Xám</option>
+                              <option value="bg-blue-500">Xanh dương</option>
+                              <option value="bg-orange-500">Cam</option>
+                              <option value="bg-purple-500">Tím</option>
+                              <option value="bg-emerald-500">Xanh lá</option>
+                              <option value="bg-red-500">Đỏ</option>
+                              <option value="bg-yellow-500">Vàng</option>
+                              <option value="bg-pink-500">Hồng</option>
+                           </select>
                         </div>
                      </div>
-                     
-                     <button 
+                     <div className="grid grid-cols-2 gap-2 mb-2">
+                        <div>
+                           <label className="text-xs font-medium text-slate-500 mb-1 block">Chi tiết</label>
+                           <input
+                              type="text"
+                              value={newStageDetails}
+                              onChange={(e) => setNewStageDetails(e.target.value)}
+                              placeholder="Mô tả chi tiết..."
+                              className="w-full p-1.5 border border-neutral-700 rounded text-sm outline-none focus:border-gold-500 bg-neutral-900 text-slate-200"
+                           />
+                        </div>
+                        <div>
+                           <label className="text-xs font-medium text-slate-500 mb-1 block">Tiêu chuẩn</label>
+                           <input
+                              type="text"
+                              value={newStageStandards}
+                              onChange={(e) => setNewStageStandards(e.target.value)}
+                              placeholder="Tiêu chuẩn hoàn thành..."
+                              className="w-full p-1.5 border border-neutral-700 rounded text-sm outline-none focus:border-gold-500 bg-neutral-900 text-slate-200"
+                           />
+                        </div>
+                     </div>
+
+                     <button
                         onClick={() => {
                            if (!newStageName.trim()) return;
                            const newStage: WorkflowStage = {
                               id: newStageName.toLowerCase().replace(/\s+/g, '-'),
                               name: newStageName,
                               order: stages.length,
-                              color: newStageColor,
-                              details: newStageDetails.trim() || undefined,
-                              standards: newStageStandards.trim() || undefined
+                              color: newStageColor
                            };
+
+                           // Only add details and standards if they have values
+                           if (newStageDetails.trim()) {
+                              newStage.details = newStageDetails.trim();
+                           }
+                           if (newStageStandards.trim()) {
+                              newStage.standards = newStageStandards.trim();
+                           }
+
                            setStages([...stages, newStage]);
                            setNewStageName('');
                            setNewStageColor('bg-slate-500');
@@ -703,7 +915,7 @@ const CreateWorkflowModal: React.FC<{ onClose: () => void; onSuccess?: () => voi
                            setNewStageStandards('');
                         }}
                         disabled={!newStageName.trim()}
-                        className="w-full py-2 bg-slate-100 hover:bg-white disabled:bg-neutral-800 text-black rounded text-sm font-medium transition-colors"
+                        className="w-full py-1.5 bg-slate-100 hover:bg-white disabled:bg-neutral-800 text-black rounded text-sm font-medium transition-colors"
                      >
                         + Thêm Bước
                      </button>
@@ -715,207 +927,15 @@ const CreateWorkflowModal: React.FC<{ onClose: () => void; onSuccess?: () => voi
                            Chưa có bước nào. Các bước này sẽ hiển thị ở Kanban Board.
                         </div>
                      )}
-                     {stages.sort((a, b) => a.order - b.order).map((stage, idx) => {
-                        const [showTodoInput, setShowTodoInput] = useState(false);
-                        const [newTodoText, setNewTodoText] = useState('');
-                        const stageTodos = stage.todos || [];
-                        
-                        return (
-                           <div key={stage.id} className="p-3 bg-neutral-900 border border-neutral-800 rounded-lg shadow-sm">
-                              <div className="flex items-center justify-between mb-2">
-                                 <div className="flex items-center gap-3">
-                                    <div className="flex items-center gap-2">
-                                       <GripVertical size={16} className="text-slate-600 cursor-move" />
-                                       <div className={`w-3 h-3 rounded-full ${stage.color || 'bg-slate-500'}`}></div>
-                                    </div>
-                                    <div>
-                                       <h5 className="font-medium text-sm text-slate-200">{stage.name}</h5>
-                                       <div className="flex items-center gap-2 text-xs text-slate-500">
-                                          <span>Thứ tự: {idx + 1}</span>
-                                          {stageTodos.length > 0 && (
-                                             <span className="bg-neutral-800 px-2 py-0.5 rounded">
-                                                {stageTodos.filter(t => t.completed).length}/{stageTodos.length} task
-                                             </span>
-                                          )}
-                                       </div>
-                                    </div>
-                                 </div>
-                                 <div className="flex items-center gap-2">
-                                    {idx > 0 && (
-                                       <button
-                                          onClick={() => {
-                                             const newStages = [...stages];
-                                             [newStages[idx], newStages[idx - 1]] = [newStages[idx - 1], newStages[idx]];
-                                             newStages[idx].order = idx;
-                                             newStages[idx - 1].order = idx - 1;
-                                             setStages(newStages);
-                                          }}
-                                          className="p-1.5 hover:bg-neutral-800 rounded text-slate-500 hover:text-slate-300"
-                                          title="Di chuyển lên"
-                                       >
-                                          <ArrowUp size={14} />
-                                       </button>
-                                    )}
-                                    {idx < stages.length - 1 && (
-                                       <button
-                                          onClick={() => {
-                                             const newStages = [...stages];
-                                             [newStages[idx], newStages[idx + 1]] = [newStages[idx + 1], newStages[idx]];
-                                             newStages[idx].order = idx;
-                                             newStages[idx + 1].order = idx + 1;
-                                             setStages(newStages);
-                                          }}
-                                          className="p-1.5 hover:bg-neutral-800 rounded text-slate-500 hover:text-slate-300"
-                                          title="Di chuyển xuống"
-                                       >
-                                          <ArrowDown size={14} />
-                                       </button>
-                                    )}
-                                    <button 
-                                       onClick={() => {
-                                          if (window.confirm(`Xóa bước "${stage.name}"?`)) {
-                                             setStages(stages.filter(s => s.id !== stage.id).map((s, i) => ({ ...s, order: i })));
-                                          }
-                                       }}
-                                       className="text-slate-500 hover:text-red-500 p-1"
-                                    >
-                                       <X size={16} />
-                                    </button>
-                                 </div>
-                              </div>
-                              {(stage.details || stage.standards) && (
-                                 <div className="grid grid-cols-1 md:grid-cols-2 gap-3 mt-2 pt-2 border-t border-neutral-800">
-                                    {stage.details && (
-                                       <div>
-                                          <p className="text-xs font-medium text-slate-400 mb-1">Chi tiết:</p>
-                                          <p className="text-xs text-slate-300">{stage.details}</p>
-                                       </div>
-                                    )}
-                                    {stage.standards && (
-                                       <div>
-                                          <p className="text-xs font-medium text-slate-400 mb-1">Tiêu chuẩn:</p>
-                                          <p className="text-xs text-slate-300">{stage.standards}</p>
-                                       </div>
-                                    )}
-                                 </div>
-                              )}
-                              
-                              {/* Tasks Section */}
-                              <div className="mt-3 pt-3 border-t border-neutral-800">
-                                 <div className="flex items-center justify-between mb-2">
-                                    <p className="text-xs font-medium text-slate-400">Các task con:</p>
-                                    <button
-                                       onClick={() => setShowTodoInput(!showTodoInput)}
-                                       className="text-xs px-2 py-1 bg-gold-600/20 hover:bg-gold-600/30 text-gold-400 rounded flex items-center gap-1 transition-colors"
-                                    >
-                                       <Plus size={12} />
-                                       Thêm task
-                                    </button>
-                                 </div>
-                                 
-                                 {showTodoInput && (
-                                    <div className="flex gap-2 mb-2">
-                                       <input
-                                          type="text"
-                                          value={newTodoText}
-                                          onChange={(e) => setNewTodoText(e.target.value)}
-                                          onKeyPress={(e) => {
-                                             if (e.key === 'Enter' && newTodoText.trim()) {
-                                                const newTodo: TodoStep = {
-                                                   id: `todo-${Date.now()}`,
-                                                   title: newTodoText,
-                                                   completed: false,
-                                                   order: stageTodos.length
-                                                };
-                                                const updatedStages = stages.map(s => 
-                                                   s.id === stage.id 
-                                                      ? { ...s, todos: [...(s.todos || []), newTodo] }
-                                                      : s
-                                                );
-                                                setStages(updatedStages);
-                                                setNewTodoText('');
-                                                setShowTodoInput(false);
-                                             }
-                                          }}
-                                          placeholder="Nhập tên task..."
-                                          className="flex-1 px-2 py-1 text-xs border border-neutral-700 rounded bg-neutral-800 text-slate-200 outline-none focus:border-gold-500"
-                                          autoFocus
-                                       />
-                                       <button
-                                          onClick={() => {
-                                             if (newTodoText.trim()) {
-                                                const newTodo: TodoStep = {
-                                                   id: `todo-${Date.now()}`,
-                                                   title: newTodoText,
-                                                   completed: false,
-                                                   order: stageTodos.length
-                                                };
-                                                const updatedStages = stages.map(s => 
-                                                   s.id === stage.id 
-                                                      ? { ...s, todos: [...(s.todos || []), newTodo] }
-                                                      : s
-                                                );
-                                                setStages(updatedStages);
-                                                setNewTodoText('');
-                                                setShowTodoInput(false);
-                                             }
-                                          }}
-                                          className="px-2 py-1 bg-gold-600 hover:bg-gold-700 text-black rounded text-xs font-medium transition-colors"
-                                       >
-                                          Thêm
-                                       </button>
-                                    </div>
-                                 )}
-                                 
-                                 {stageTodos.length === 0 ? (
-                                    <p className="text-xs text-slate-600 italic">Chưa có task nào</p>
-                                 ) : (
-                                    <div className="space-y-1">
-                                       {stageTodos.map(todo => (
-                                          <div key={todo.id} className="flex items-center gap-2 text-xs p-1.5 bg-neutral-800/50 rounded">
-                                             <button
-                                                onClick={() => {
-                                                   const updatedStages = stages.map(s => 
-                                                      s.id === stage.id
-                                                         ? { ...s, todos: (s.todos || []).map(t => 
-                                                            t.id === todo.id ? { ...t, completed: !t.completed } : t
-                                                         )}
-                                                         : s
-                                                   );
-                                                   setStages(updatedStages);
-                                                }}
-                                                className="flex-shrink-0"
-                                             >
-                                                {todo.completed ? (
-                                                   <CheckCircle2 size={14} className="text-emerald-500" />
-                                                ) : (
-                                                   <Circle size={14} className="text-slate-600" />
-                                                )}
-                                             </button>
-                                             <span className={`flex-1 ${todo.completed ? 'text-slate-500 line-through' : 'text-slate-300'}`}>
-                                                {todo.title}
-                                             </span>
-                                             <button
-                                                onClick={() => {
-                                                   const updatedStages = stages.map(s => 
-                                                      s.id === stage.id
-                                                         ? { ...s, todos: (s.todos || []).filter(t => t.id !== todo.id).map((t, i) => ({ ...t, order: i })) }
-                                                         : s
-                                                   );
-                                                   setStages(updatedStages);
-                                                }}
-                                                className="text-slate-600 hover:text-red-500 transition-colors"
-                                             >
-                                                <X size={12} />
-                                             </button>
-                                          </div>
-                                       ))}
-                                    </div>
-                                 )}
-                              </div>
-                           </div>
-                        );
-                     })}
+                     {stages.sort((a, b) => a.order - b.order).map((stage, idx) => (
+                        <StageItem
+                           key={stage.id}
+                           stage={stage}
+                           idx={idx}
+                           stages={stages}
+                           setStages={setStages}
+                        />
+                     ))}
                   </div>
                </div>
 
@@ -925,12 +945,12 @@ const CreateWorkflowModal: React.FC<{ onClose: () => void; onSuccess?: () => voi
                      <Package size={18} className="text-gold-500" />
                      Định Mức Nguyên Vật Liệu
                   </h4>
-                  
+
                   <div className="bg-neutral-800/30 p-4 rounded-lg border border-neutral-800 mb-4">
                      <div className="grid grid-cols-1 md:grid-cols-3 gap-3 mb-3">
                         <div className="md:col-span-2">
                            <label className="text-xs font-medium text-slate-500 mb-1 block">Chọn vật tư trong kho</label>
-                           <select 
+                           <select
                               className="w-full p-2 border border-neutral-700 rounded text-sm outline-none focus:border-gold-500 bg-neutral-900 text-slate-200"
                               value={selectedInventoryId}
                               onChange={(e) => setSelectedInventoryId(e.target.value)}
@@ -946,8 +966,8 @@ const CreateWorkflowModal: React.FC<{ onClose: () => void; onSuccess?: () => voi
                         <div>
                            <label className="text-xs font-medium text-slate-500 mb-1 block">Định mức / SP</label>
                            <div className="flex">
-                              <input 
-                                 type="number" 
+                              <input
+                                 type="number"
                                  step="0.01"
                                  className="w-full p-2 border border-neutral-700 rounded-l text-sm outline-none focus:border-gold-500 bg-neutral-900 text-slate-200"
                                  placeholder="0.00"
@@ -960,13 +980,13 @@ const CreateWorkflowModal: React.FC<{ onClose: () => void; onSuccess?: () => voi
                            </div>
                         </div>
                      </div>
-                     
+
                      {selectedInventoryId && (
                         <div className="flex items-center gap-3 mb-3 bg-neutral-900 p-2 rounded border border-neutral-800">
-                           <img 
-                              src={getInventoryItem(selectedInventoryId)?.image} 
-                              alt="" 
-                              className="w-8 h-8 rounded object-cover opacity-80" 
+                           <img
+                              src={getInventoryItem(selectedInventoryId)?.image}
+                              alt=""
+                              className="w-8 h-8 rounded object-cover opacity-80"
                            />
                            <div className="text-xs">
                               <span className="font-medium text-slate-200">{getInventoryItem(selectedInventoryId)?.name}</span>
@@ -977,7 +997,7 @@ const CreateWorkflowModal: React.FC<{ onClose: () => void; onSuccess?: () => voi
                         </div>
                      )}
 
-                     <button 
+                     <button
                         onClick={handleAddMaterial}
                         disabled={!selectedInventoryId || !quantity}
                         className="w-full py-2 bg-slate-100 hover:bg-white disabled:bg-neutral-800 text-black rounded text-sm font-medium transition-colors"
@@ -1010,7 +1030,7 @@ const CreateWorkflowModal: React.FC<{ onClose: () => void; onSuccess?: () => voi
                                     <div className="font-bold text-slate-200 text-sm">{mat.quantity} <span className="text-xs font-normal text-slate-500">{itemDetails?.unit}</span></div>
                                     <div className="text-[10px] text-slate-500">định mức</div>
                                  </div>
-                                 <button 
+                                 <button
                                     onClick={() => handleRemoveMaterial(idx)}
                                     className="text-slate-500 hover:text-red-500 p-1"
                                  >
@@ -1026,7 +1046,7 @@ const CreateWorkflowModal: React.FC<{ onClose: () => void; onSuccess?: () => voi
 
             <div className="p-5 border-t border-neutral-800 bg-neutral-900 flex justify-end gap-3">
                <button onClick={onClose} className="px-4 py-2 border border-neutral-700 rounded-lg text-slate-400 hover:bg-neutral-800 text-sm font-medium">Hủy</button>
-               <button 
+               <button
                   onClick={handleSave}
                   className="px-4 py-2 bg-gold-600 hover:bg-gold-700 text-black rounded-lg text-sm font-medium shadow-lg shadow-gold-900/20"
                >
@@ -1071,7 +1091,7 @@ const StageItemWithTodos: React.FC<{
    };
 
    const handleUpdateTodoNote = (todoId: string, note: string) => {
-      const updatedTodos = todos.map(t => 
+      const updatedTodos = todos.map(t =>
          t.id === todoId ? { ...t, description: note } : t
       );
       setTodos(updatedTodos);
@@ -1079,7 +1099,7 @@ const StageItemWithTodos: React.FC<{
    };
 
    const handleToggleTodo = (todoId: string) => {
-      const updatedTodos = todos.map(t => 
+      const updatedTodos = todos.map(t =>
          t.id === todoId ? { ...t, completed: !t.completed } : t
       );
       setTodos(updatedTodos);
@@ -1147,7 +1167,7 @@ const StageItemWithTodos: React.FC<{
                      <ArrowDown size={14} />
                   </button>
                )}
-               <button 
+               <button
                   onClick={onDelete}
                   className="text-slate-500 hover:text-red-500 p-1"
                >
@@ -1319,7 +1339,7 @@ const WorkflowViewModal: React.FC<{ workflow: WorkflowDefinition, onClose: () =>
    const handleUpdateStage = async (updatedStage: WorkflowStage) => {
       const updatedStages = stages.map(s => s.id === updatedStage.id ? updatedStage : s);
       setStages(updatedStages);
-      
+
       // Save to Firebase
       try {
          await set(ref(db, `${DB_PATHS.WORKFLOWS}/${workflow.id}/stages`), updatedStages);
@@ -1389,7 +1409,7 @@ const WorkflowViewModal: React.FC<{ workflow: WorkflowDefinition, onClose: () =>
                      <Columns size={18} className="text-gold-500" />
                      Các Bước Xử Lý ({stages.length})
                   </h4>
-                  
+
                   {stages.length === 0 ? (
                      <div className="text-center py-8 text-slate-600 text-sm border border-dashed border-neutral-800 rounded-lg">
                         Chưa có bước nào được cấu hình
@@ -1402,9 +1422,9 @@ const WorkflowViewModal: React.FC<{ workflow: WorkflowDefinition, onClose: () =>
                               stage={stage}
                               idx={idx}
                               totalStages={stages.length}
-                              onMoveUp={() => {}}
-                              onMoveDown={() => {}}
-                              onDelete={() => {}}
+                              onMoveUp={() => { }}
+                              onMoveDown={() => { }}
+                              onDelete={() => { }}
                               onUpdate={handleUpdateStage}
                            />
                         ))}
@@ -1468,12 +1488,12 @@ const WorkflowConfigModal: React.FC<{ workflow: WorkflowDefinition, onClose: () 
 
    const handleAddMaterial = () => {
       if (!selectedInventoryId || !quantity) return;
-      
+
       const newItem = {
          inventoryItemId: selectedInventoryId,
          quantity: parseFloat(quantity)
       };
-      
+
       setMaterials([...materials, newItem]);
       setSelectedInventoryId('');
       setQuantity('');
@@ -1514,7 +1534,7 @@ const WorkflowConfigModal: React.FC<{ workflow: WorkflowDefinition, onClose: () 
                               return memberDept === dept;
                            });
                            // Cập nhật assignedMembers chỉ giữ lại những người thuộc phòng ban mới
-                           setAssignedMembers(prev => prev.filter(id => 
+                           setAssignedMembers(prev => prev.filter(id =>
                               membersInDept.some(m => m.id === id)
                            ));
                         }}
@@ -1537,7 +1557,7 @@ const WorkflowConfigModal: React.FC<{ workflow: WorkflowDefinition, onClose: () 
                      <Users size={18} className="text-gold-500" />
                      Nhân Sự Phụ Trách
                   </h4>
-                  
+
                   <div className="bg-neutral-800/30 p-4 rounded-lg border border-neutral-800">
                      <div className="mb-3">
                         <label className="text-xs font-medium text-slate-500 mb-2 block">Tìm kiếm nhân sự</label>
@@ -1549,13 +1569,13 @@ const WorkflowConfigModal: React.FC<{ workflow: WorkflowDefinition, onClose: () 
                            className="w-full p-2 border border-neutral-700 rounded text-sm outline-none focus:border-gold-500 bg-neutral-900 text-slate-200"
                         />
                      </div>
-                     
+
                      <div className="max-h-48 overflow-y-auto space-y-2">
                         {MOCK_MEMBERS
                            .filter(m => {
                               const memberDept = m.department || getDepartmentFromRole(m.role);
                               const matchesDept = memberDept === workflowDepartment;
-                              const matchesSearch = !memberSearchText.trim() || 
+                              const matchesSearch = !memberSearchText.trim() ||
                                  m.name.toLowerCase().includes(memberSearchText.toLowerCase()) ||
                                  m.phone.includes(memberSearchText) ||
                                  m.email.toLowerCase().includes(memberSearchText.toLowerCase());
@@ -1588,12 +1608,12 @@ const WorkflowConfigModal: React.FC<{ workflow: WorkflowDefinition, onClose: () 
                            const memberDept = m.department || getDepartmentFromRole(m.role);
                            return memberDept === workflowDepartment && m.status === 'Active';
                         }).length === 0 && (
-                           <div className="text-center py-4 text-slate-600 text-sm">
-                              Không có nhân sự nào trong phòng ban này
-                           </div>
-                        )}
+                              <div className="text-center py-4 text-slate-600 text-sm">
+                                 Không có nhân sự nào trong phòng ban này
+                              </div>
+                           )}
                      </div>
-                     
+
                      {assignedMembers.length > 0 && (
                         <div className="mt-3 pt-3 border-t border-neutral-800">
                            <div className="text-xs font-medium text-slate-400 mb-2">Đã chọn ({assignedMembers.length}):</div>
@@ -1628,7 +1648,7 @@ const WorkflowConfigModal: React.FC<{ workflow: WorkflowDefinition, onClose: () 
                      <Columns size={18} className="text-gold-500" />
                      Các Bước Xử Lý (Hiển thị ở Kanban)
                   </h4>
-                  
+
                   {/* Add Stage Form */}
                   <div className="bg-neutral-800/30 p-4 rounded-lg border border-neutral-800 mb-4">
                      <div className="grid grid-cols-1 md:grid-cols-3 gap-3 mb-3">
@@ -1660,8 +1680,8 @@ const WorkflowConfigModal: React.FC<{ workflow: WorkflowDefinition, onClose: () 
                            </select>
                         </div>
                      </div>
-                     
-                     <button 
+
+                     <button
                         onClick={() => {
                            if (!newStageName.trim()) return;
                            const newStage: WorkflowStage = {
@@ -1729,13 +1749,13 @@ const WorkflowConfigModal: React.FC<{ workflow: WorkflowDefinition, onClose: () 
                      <Package size={18} className="text-gold-500" />
                      Định Mức Nguyên Vật Liệu
                   </h4>
-                  
+
                   {/* Add Form */}
                   <div className="bg-neutral-800/30 p-4 rounded-lg border border-neutral-800 mb-4">
                      <div className="grid grid-cols-1 md:grid-cols-3 gap-3 mb-3">
                         <div className="md:col-span-2">
                            <label className="text-xs font-medium text-slate-500 mb-1 block">Chọn vật tư trong kho</label>
-                           <select 
+                           <select
                               className="w-full p-2 border border-neutral-700 rounded text-sm outline-none focus:border-gold-500 bg-neutral-900 text-slate-200"
                               value={selectedInventoryId}
                               onChange={(e) => setSelectedInventoryId(e.target.value)}
@@ -1751,8 +1771,8 @@ const WorkflowConfigModal: React.FC<{ workflow: WorkflowDefinition, onClose: () 
                         <div>
                            <label className="text-xs font-medium text-slate-500 mb-1 block">Định mức / SP</label>
                            <div className="flex">
-                              <input 
-                                 type="number" 
+                              <input
+                                 type="number"
                                  step="0.01"
                                  className="w-full p-2 border border-neutral-700 rounded-l text-sm outline-none focus:border-gold-500 bg-neutral-900 text-slate-200"
                                  placeholder="0.00"
@@ -1765,14 +1785,14 @@ const WorkflowConfigModal: React.FC<{ workflow: WorkflowDefinition, onClose: () 
                            </div>
                         </div>
                      </div>
-                     
+
                      {/* Show selected item details preview */}
                      {selectedInventoryId && (
                         <div className="flex items-center gap-3 mb-3 bg-neutral-900 p-2 rounded border border-neutral-800">
-                           <img 
-                              src={getInventoryItem(selectedInventoryId)?.image} 
-                              alt="" 
-                              className="w-8 h-8 rounded object-cover opacity-80" 
+                           <img
+                              src={getInventoryItem(selectedInventoryId)?.image}
+                              alt=""
+                              className="w-8 h-8 rounded object-cover opacity-80"
                            />
                            <div className="text-xs">
                               <span className="font-medium text-slate-200">{getInventoryItem(selectedInventoryId)?.name}</span>
@@ -1783,7 +1803,7 @@ const WorkflowConfigModal: React.FC<{ workflow: WorkflowDefinition, onClose: () 
                         </div>
                      )}
 
-                     <button 
+                     <button
                         onClick={handleAddMaterial}
                         disabled={!selectedInventoryId || !quantity}
                         className="w-full py-2 bg-slate-100 hover:bg-white disabled:bg-neutral-800 text-black rounded text-sm font-medium transition-colors"
@@ -1817,7 +1837,7 @@ const WorkflowConfigModal: React.FC<{ workflow: WorkflowDefinition, onClose: () 
                                     <div className="font-bold text-slate-200 text-sm">{mat.quantity} <span className="text-xs font-normal text-slate-500">{itemDetails?.unit}</span></div>
                                     <div className="text-[10px] text-slate-500">định mức</div>
                                  </div>
-                                 <button 
+                                 <button
                                     onClick={() => handleRemoveMaterial(idx)}
                                     className="text-slate-500 hover:text-red-500 p-1"
                                  >
@@ -1833,7 +1853,7 @@ const WorkflowConfigModal: React.FC<{ workflow: WorkflowDefinition, onClose: () 
 
             <div className="p-5 border-t border-neutral-800 bg-neutral-900 flex justify-end gap-3">
                <button onClick={onClose} className="px-4 py-2 border border-neutral-700 rounded-lg text-slate-400 hover:bg-neutral-800 text-sm font-medium">Đóng</button>
-               <button 
+               <button
                   onClick={async () => {
                      try {
                         // Tự động chọn màu dựa trên phòng ban
@@ -1845,7 +1865,7 @@ const WorkflowConfigModal: React.FC<{ workflow: WorkflowDefinition, onClose: () 
                            'Quản Lý': 'bg-gold-900/30 text-gold-400 border-gold-800',
                            'Kinh Doanh': 'bg-cyan-900/30 text-cyan-400 border-cyan-800'
                         };
-                        
+
                         // Cập nhật quy trình với materials và stages mới
                         // Đảm bảo giữ lại tất cả các field bắt buộc
                         const updatedWorkflow: any = {
@@ -1856,7 +1876,7 @@ const WorkflowConfigModal: React.FC<{ workflow: WorkflowDefinition, onClose: () 
                            types: workflow.types || [],
                            color: departmentColors[workflowDepartment] || workflow.color || 'bg-blue-900/30 text-blue-400 border-blue-800'
                         };
-                        
+
                         // Chỉ thêm materials và stages nếu có giá trị (không phải undefined)
                         if (materials.length > 0) {
                            updatedWorkflow.materials = materials;
@@ -1867,10 +1887,10 @@ const WorkflowConfigModal: React.FC<{ workflow: WorkflowDefinition, onClose: () 
                         if (assignedMembers.length > 0) {
                            updatedWorkflow.assignedMembers = assignedMembers;
                         }
-                        
+
                         // Lưu vào Firebase với tên bảng tiếng Việt
                         await set(ref(db, `${DB_PATHS.WORKFLOWS}/${workflow.id}`), updatedWorkflow);
-                        
+
                         alert(`Đã lưu cấu hình quy trình!\n\n- Vật tư: ${materials.length} loại\n- Các bước: ${stages.length} bước\n\nĐã lưu vào Firebase!`);
                         onClose();
                         // Workflows will be updated automatically via Firebase listener
@@ -1879,7 +1899,7 @@ const WorkflowConfigModal: React.FC<{ workflow: WorkflowDefinition, onClose: () 
                         const errorMessage = error?.message || String(error);
                         alert('Lỗi khi lưu cấu hình vào Firebase:\n' + errorMessage + '\n\nVui lòng kiểm tra kết nối Firebase và thử lại.');
                      }
-                  }} 
+                  }}
                   className="px-4 py-2 bg-gold-600 hover:bg-gold-700 text-black rounded-lg text-sm font-medium shadow-lg shadow-gold-900/20"
                >
                   Lưu Cấu Hình
