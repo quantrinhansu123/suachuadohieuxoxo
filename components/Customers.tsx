@@ -315,11 +315,11 @@ export const Customers: React.FC = () => {
         <div className="flex flex-wrap gap-6 sm:gap-12 pt-2 border-t border-neutral-800 text-sm">
           <div className="flex items-center gap-2">
             <span className="text-slate-500">Số khách:</span>
-            <span className="text-xl font-bold text-slate-200">{stats.count}</span>
+            <span className="text-xl font-bold text-slate-200">{stats.count.toLocaleString('vi-VN')}</span>
           </div>
           <div className="flex items-center gap-2">
             <span className="text-slate-500">Số đơn:</span>
-            <span className="text-xl font-bold text-blue-400">{stats.orderCount}</span>
+            <span className="text-xl font-bold text-blue-400">{stats.orderCount.toLocaleString('vi-VN')}</span>
           </div>
           <div className="flex items-center gap-2">
             <span className="text-slate-500">Doanh số:</span>

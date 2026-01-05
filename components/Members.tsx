@@ -348,13 +348,30 @@ export const Members: React.FC = () => {
               )}
 
               <div>
-                <label className="block text-sm font-medium text-slate-400 mb-2">URL Ảnh đại diện</label>
+                <label className="block text-sm font-medium text-slate-400 mb-2">Ảnh đại diện</label>
                 <input
-                  type="url"
-                  value={newMember.avatar}
-                  onChange={(e) => setNewMember({ ...newMember, avatar: e.target.value })}
-                  placeholder="https://..."
-                  className="w-full px-4 py-2 bg-neutral-800 border border-neutral-700 rounded-lg text-slate-200 focus:ring-2 focus:ring-gold-500 outline-none transition-all placeholder-slate-600"
+                  type="file"
+                  accept="image/*"
+                  onChange={(e) => {
+                    const file = e.target.files?.[0];
+                    if (file) {
+                      if (!file.type.startsWith('image/')) {
+                        alert('Vui lòng chọn file ảnh!');
+                        return;
+                      }
+                      if (file.size > 5 * 1024 * 1024) {
+                        alert('File quá lớn! Vui lòng chọn file nhỏ hơn 5MB.');
+                        return;
+                      }
+                      const reader = new FileReader();
+                      reader.onload = (event) => {
+                        const base64 = event.target?.result as string;
+                        setNewMember({ ...newMember, avatar: base64 });
+                      };
+                      reader.readAsDataURL(file);
+                    }
+                  }}
+                  className="w-full px-4 py-2 bg-neutral-800 border border-neutral-700 rounded-lg text-slate-200 focus:ring-2 focus:ring-gold-500 outline-none transition-all file:mr-4 file:py-2 file:px-4 file:rounded-lg file:border-0 file:text-sm file:font-semibold file:bg-gold-600 file:text-black hover:file:bg-gold-500 file:cursor-pointer"
                 />
                 {newMember.avatar && (
                   <div className="mt-2">
@@ -517,13 +534,30 @@ export const Members: React.FC = () => {
               )}
 
               <div>
-                <label className="block text-sm font-medium text-slate-400 mb-2">URL Ảnh đại diện</label>
+                <label className="block text-sm font-medium text-slate-400 mb-2">Ảnh đại diện</label>
                 <input
-                  type="url"
-                  value={editingMember.avatar || ''}
-                  onChange={(e) => setEditingMember({ ...editingMember, avatar: e.target.value })}
-                  placeholder="https://..."
-                  className="w-full px-4 py-2 bg-neutral-800 border border-neutral-700 rounded-lg text-slate-200 focus:ring-2 focus:ring-gold-500 outline-none transition-all placeholder-slate-600"
+                  type="file"
+                  accept="image/*"
+                  onChange={(e) => {
+                    const file = e.target.files?.[0];
+                    if (file) {
+                      if (!file.type.startsWith('image/')) {
+                        alert('Vui lòng chọn file ảnh!');
+                        return;
+                      }
+                      if (file.size > 5 * 1024 * 1024) {
+                        alert('File quá lớn! Vui lòng chọn file nhỏ hơn 5MB.');
+                        return;
+                      }
+                      const reader = new FileReader();
+                      reader.onload = (event) => {
+                        const base64 = event.target?.result as string;
+                        setEditingMember({ ...editingMember, avatar: base64 });
+                      };
+                      reader.readAsDataURL(file);
+                    }
+                  }}
+                  className="w-full px-4 py-2 bg-neutral-800 border border-neutral-700 rounded-lg text-slate-200 focus:ring-2 focus:ring-gold-500 outline-none transition-all file:mr-4 file:py-2 file:px-4 file:rounded-lg file:border-0 file:text-sm file:font-semibold file:bg-gold-600 file:text-black hover:file:bg-gold-500 file:cursor-pointer"
                 />
                 {editingMember.avatar && (
                   <div className="mt-2">

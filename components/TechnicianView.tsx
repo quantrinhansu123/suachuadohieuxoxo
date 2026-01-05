@@ -460,12 +460,99 @@ export const TechnicianView: React.FC = () => {
     try {
       const nextStepIndex = currentStepIndex + 1;
       if (nextStepIndex < workflowStages.length) {
+        // Move to next stage in current workflow
         const nextStage = workflowStages[nextStepIndex];
         const currentStage = workflowStages[currentStepIndex];
         await updateOrderItemStatus(activeTask.orderId, activeTask.id, nextStage.id, CURRENT_USER.name, "Hoàn thành bước " + currentStage.name);
       } else {
-        // Final step logic - use last stage ID or 'ready'
+        // Final step - check if there's a next workflow
         const lastStage = workflowStages[workflowStages.length - 1];
+        
+        // Check for next workflow
+        if (activeTask.serviceId && activeTask.workflowId) {
+          const service = services.find(s => s.id === activeTask.serviceId);
+          if (service && service.workflows && Array.isArray(service.workflows) && service.workflows.length > 0) {
+            // Find current workflow index
+            const currentWfIndex = service.workflows.findIndex(wf => wf.id === activeTask.workflowId);
+            
+            if (currentWfIndex !== -1 && currentWfIndex < service.workflows.length - 1) {
+              // There's a next workflow - move to it
+              const nextWfConfig = service.workflows[currentWfIndex + 1];
+              const nextWf = workflows.find(w => w.id === nextWfConfig.id);
+              
+              if (nextWf && nextWf.stages && nextWf.stages.length > 0) {
+                // Find first stage of next workflow
+                const sortedStages = [...nextWf.stages].sort((a, b) => a.order - b.order);
+                const firstStage = sortedStages[0];
+                
+                // Update order with new workflow
+                const order = orders.find(o => o.id === activeTask.orderId);
+                if (order) {
+                  const now = Date.now();
+                  const updatedItems = order.items.map(item => {
+                    if (item.id === activeTask.id) {
+                      // Close current workflow history
+                      const newHistory = [...(item.history || [])];
+                      if (newHistory.length > 0) {
+                        const lastEntry = newHistory[newHistory.length - 1];
+                        if (!lastEntry.leftAt) {
+                          newHistory[newHistory.length - 1] = {
+                            ...lastEntry,
+                            leftAt: now,
+                            duration: now - lastEntry.enteredAt
+                          };
+                        }
+                      }
+                      // Open new workflow history
+                      newHistory.push({
+                        stageId: firstStage.id,
+                        stageName: firstStage.name,
+                        enteredAt: now,
+                        performedBy: CURRENT_USER.name
+                      });
+
+                      return {
+                        ...item,
+                        workflowId: nextWf.id, // Update to next workflow
+                        status: firstStage.id,
+                        history: newHistory,
+                        lastUpdated: now
+                      };
+                    }
+                    return item;
+                  });
+
+                  // Helper to remove undefined values
+                  const removeUndefined = (obj: any): any => {
+                    if (obj === null || obj === undefined) return null;
+                    if (Array.isArray(obj)) {
+                      return obj.map(item => removeUndefined(item));
+                    }
+                    if (typeof obj === 'object') {
+                      const cleaned: any = {};
+                      for (const key in obj) {
+                        if (obj[key] !== undefined) {
+                          cleaned[key] = removeUndefined(obj[key]);
+                        }
+                      }
+                      return cleaned;
+                    }
+                    return obj;
+                  };
+
+                  const cleanedOrder = removeUndefined({ ...order, items: updatedItems });
+                  await updateOrder(order.id, cleanedOrder);
+                  alert(`Đã chuyển sang quy trình: ${nextWf.label} (Bước: ${firstStage.name})`);
+                  return; // Exit early, don't mark as done
+                }
+              } else {
+                alert('Quy trình tiếp theo chưa được cấu hình các bước!');
+              }
+            }
+          }
+        }
+        
+        // No next workflow - mark as done
         await updateOrderItemStatus(activeTask.orderId, activeTask.id, lastStage.id, CURRENT_USER.name, "Hoàn thành quy trình");
       }
     } catch (error: any) {

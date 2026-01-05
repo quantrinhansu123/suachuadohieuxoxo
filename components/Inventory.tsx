@@ -78,6 +78,16 @@ const ActionMenu: React.FC<{
   );
 };
 
+// Helper function to generate SKU automatically
+const generateSKU = (): string => {
+  const now = new Date();
+  const year = now.getFullYear();
+  const month = String(now.getMonth() + 1).padStart(2, '0');
+  // Generate random alphanumeric string (6 characters)
+  const randomStr = Math.random().toString(36).substring(2, 8).toUpperCase();
+  return `XOXO_${year}_${month}_${randomStr}`;
+};
+
 export const Inventory: React.FC = () => {
   const { inventory, addInventoryItem, updateInventoryItem, deleteInventoryItem } = useAppStore(); 
   const [filter, setFilter] = useState<FilterState>({ locNhanh: 'all', thoiGian: { tuNgay: null, denNgay: null } });
@@ -114,7 +124,10 @@ export const Inventory: React.FC = () => {
   }, [inventory, filter, searchText]);
 
   const handleAddItem = async () => {
-    if (!newItem.sku || !newItem.name || !newItem.quantity || !newItem.unit || !newItem.importPrice) {
+    // Auto-generate SKU if not set
+    const finalSKU = newItem.sku || generateSKU();
+    
+    if (!finalSKU || !newItem.name || !newItem.quantity || !newItem.unit || !newItem.importPrice) {
       alert('Vui lòng điền đầy đủ thông tin bắt buộc!');
       return;
     }
@@ -122,7 +135,7 @@ export const Inventory: React.FC = () => {
     try {
       const newInventoryItem: any = {
         id: `INV${Date.now().toString().slice(-6)}`,
-        sku: newItem.sku.toUpperCase(),
+        sku: finalSKU.toUpperCase(),
         name: newItem.name,
         category: newItem.category,
         quantity: parseFloat(newItem.quantity),
@@ -130,14 +143,18 @@ export const Inventory: React.FC = () => {
         minThreshold: parseFloat(newItem.minThreshold) || 0,
         importPrice: parseInt(newItem.importPrice),
         supplier: newItem.supplier || '',
-        lastImport: new Date().toLocaleDateString('vi-VN'),
-        image: newItem.image || undefined
+        lastImport: new Date().toLocaleDateString('vi-VN')
       };
+      
+      // Only add image if it exists and is not empty
+      if (newItem.image && newItem.image.trim() !== '') {
+        newInventoryItem.image = newItem.image;
+      }
       
       await addInventoryItem(newInventoryItem);
       
       setNewItem({
-        sku: '',
+        sku: generateSKU(), // Auto-generate new SKU for next item
         name: '',
         category: 'Hoá chất',
         quantity: '',
@@ -168,6 +185,14 @@ export const Inventory: React.FC = () => {
         minThreshold: parseFloat(editingItem.minThreshold) || 0,
         importPrice: parseInt(editingItem.importPrice)
       };
+      
+      // Only add image if it exists and is not empty, otherwise remove it
+      if (editingItem.image && editingItem.image.trim() !== '') {
+        updatedItem.image = editingItem.image;
+      } else {
+        // Remove image property if empty
+        delete updatedItem.image;
+      }
       
       await updateInventoryItem(editingItem.id, updatedItem);
       
@@ -208,14 +233,13 @@ export const Inventory: React.FC = () => {
               <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
                 <div>
                   <label className="block text-sm font-medium text-slate-400 mb-2">
-                    Mã SKU <span className="text-red-500">*</span>
+                    Mã SKU <span className="text-red-500">*</span> <span className="text-xs text-slate-500">(Tự động tạo)</span>
                   </label>
                   <input
                     type="text"
-                    value={newItem.sku}
-                    onChange={(e) => setNewItem({...newItem, sku: e.target.value.toUpperCase()})}
-                    placeholder="VD: CHEM-SAP-01"
-                    className="w-full px-4 py-2 bg-neutral-800 border border-neutral-700 rounded-lg text-slate-200 focus:ring-2 focus:ring-gold-500 outline-none transition-all placeholder-slate-600 font-mono"
+                    value={newItem.sku || generateSKU()}
+                    readOnly
+                    className="w-full px-4 py-2 bg-neutral-900 border border-neutral-700 rounded-lg text-slate-300 cursor-not-allowed opacity-75 font-mono"
                   />
                 </div>
                 
@@ -315,14 +339,36 @@ export const Inventory: React.FC = () => {
               </div>
               
               <div>
-                <label className="block text-sm font-medium text-slate-400 mb-2">URL hình ảnh</label>
+                <label className="block text-sm font-medium text-slate-400 mb-2">Hình ảnh</label>
                 <input
-                  type="url"
-                  value={newItem.image}
-                  onChange={(e) => setNewItem({...newItem, image: e.target.value})}
-                  placeholder="https://..."
-                  className="w-full px-4 py-2 bg-neutral-800 border border-neutral-700 rounded-lg text-slate-200 focus:ring-2 focus:ring-gold-500 outline-none transition-all placeholder-slate-600"
+                  type="file"
+                  accept="image/*"
+                  onChange={(e) => {
+                    const file = e.target.files?.[0];
+                    if (file) {
+                      if (!file.type.startsWith('image/')) {
+                        alert('Vui lòng chọn file ảnh!');
+                        return;
+                      }
+                      if (file.size > 5 * 1024 * 1024) {
+                        alert('File quá lớn! Vui lòng chọn file nhỏ hơn 5MB.');
+                        return;
+                      }
+                      const reader = new FileReader();
+                      reader.onload = (event) => {
+                        const base64 = event.target?.result as string;
+                        setNewItem({...newItem, image: base64});
+                      };
+                      reader.readAsDataURL(file);
+                    }
+                  }}
+                  className="w-full px-4 py-2 bg-neutral-800 border border-neutral-700 rounded-lg text-slate-200 focus:ring-2 focus:ring-gold-500 outline-none transition-all file:mr-4 file:py-2 file:px-4 file:rounded-lg file:border-0 file:text-sm file:font-semibold file:bg-gold-600 file:text-black hover:file:bg-gold-500 file:cursor-pointer"
                 />
+                {newItem.image && (
+                  <div className="mt-2">
+                    <img src={newItem.image} alt="Preview" className="w-32 h-32 rounded-lg object-cover border border-neutral-700" />
+                  </div>
+                )}
               </div>
             </div>
             
@@ -472,14 +518,36 @@ export const Inventory: React.FC = () => {
               </div>
               
               <div>
-                <label className="block text-sm font-medium text-slate-400 mb-2">URL hình ảnh</label>
+                <label className="block text-sm font-medium text-slate-400 mb-2">Hình ảnh</label>
                 <input
-                  type="url"
-                  value={editingItem.image}
-                  onChange={(e) => setEditingItem({...editingItem, image: e.target.value})}
-                  placeholder="https://..."
-                  className="w-full px-4 py-2 bg-neutral-800 border border-neutral-700 rounded-lg text-slate-200 focus:ring-2 focus:ring-gold-500 outline-none transition-all placeholder-slate-600"
+                  type="file"
+                  accept="image/*"
+                  onChange={(e) => {
+                    const file = e.target.files?.[0];
+                    if (file) {
+                      if (!file.type.startsWith('image/')) {
+                        alert('Vui lòng chọn file ảnh!');
+                        return;
+                      }
+                      if (file.size > 5 * 1024 * 1024) {
+                        alert('File quá lớn! Vui lòng chọn file nhỏ hơn 5MB.');
+                        return;
+                      }
+                      const reader = new FileReader();
+                      reader.onload = (event) => {
+                        const base64 = event.target?.result as string;
+                        setEditingItem({...editingItem, image: base64});
+                      };
+                      reader.readAsDataURL(file);
+                    }
+                  }}
+                  className="w-full px-4 py-2 bg-neutral-800 border border-neutral-700 rounded-lg text-slate-200 focus:ring-2 focus:ring-gold-500 outline-none transition-all file:mr-4 file:py-2 file:px-4 file:rounded-lg file:border-0 file:text-sm file:font-semibold file:bg-gold-600 file:text-black hover:file:bg-gold-500 file:cursor-pointer"
                 />
+                {editingItem.image && (
+                  <div className="mt-2">
+                    <img src={editingItem.image} alt="Preview" className="w-32 h-32 rounded-lg object-cover border border-neutral-700" />
+                  </div>
+                )}
               </div>
             </div>
             
@@ -518,7 +586,13 @@ export const Inventory: React.FC = () => {
              <span>Xuất/Nhập</span>
            </button>
            <button 
-             onClick={() => setShowAddModal(true)}
+             onClick={() => {
+               setNewItem({
+                 ...newItem,
+                 sku: generateSKU() // Auto-generate SKU when opening modal
+               });
+               setShowAddModal(true);
+             }}
              className="flex items-center gap-2 bg-gold-600 hover:bg-gold-700 text-black font-medium px-4 py-2.5 rounded-lg shadow-lg shadow-gold-900/20 transition-all"
            >
              <Plus size={18} />
@@ -548,7 +622,7 @@ export const Inventory: React.FC = () => {
               <div>
                 <p className="text-sm text-slate-500 font-medium group-hover:text-gold-500 transition-colors">Cảnh báo sắp hết</p>
                 <h3 className="text-2xl font-bold text-slate-100">
-                  {inventory.filter(i => i.quantity <= i.minThreshold).length}
+                  {inventory.filter(i => i.quantity <= i.minThreshold).length.toLocaleString('vi-VN')}
                 </h3>
               </div>
            </div>
@@ -623,7 +697,7 @@ export const Inventory: React.FC = () => {
                     )}
                     <ActionMenu
                       itemName={item.name}
-                      onView={() => alert(`Xem chi tiết vật tư: ${item.name}\n\nSKU: ${item.sku}\nDanh mục: ${item.category}\nTồn kho: ${item.quantity} ${item.unit}\nNgưỡng tối thiểu: ${item.minThreshold} ${item.unit}\nGiá nhập: ${item.importPrice.toLocaleString()} ₫\nNhà cung cấp: ${item.supplier || 'Chưa có'}\nLần nhập cuối: ${item.lastImport || 'Chưa có'}`)}
+                      onView={() => alert(`Xem chi tiết vật tư: ${item.name}\n\nSKU: ${item.sku}\nDanh mục: ${item.category}\nTồn kho: ${item.quantity.toLocaleString('vi-VN')} ${item.unit}\nNgưỡng tối thiểu: ${item.minThreshold.toLocaleString('vi-VN')} ${item.unit}\nGiá nhập: ${item.importPrice.toLocaleString('vi-VN')} ₫\nNhà cung cấp: ${item.supplier || 'Chưa có'}\nLần nhập cuối: ${item.lastImport || 'Chưa có'}`)}
                       onEdit={() => {
                         setEditingItem({
                           id: item.id,
@@ -650,7 +724,7 @@ export const Inventory: React.FC = () => {
                     <div>
                       <span className="text-xs text-slate-500 uppercase font-semibold">Tồn kho:</span>
                       <span className="ml-2 font-bold text-gold-500">
-                        {Number.isInteger(item.quantity) ? item.quantity : item.quantity.toFixed(1)} {item.unit}
+                        {Number.isInteger(item.quantity) ? item.quantity.toLocaleString('vi-VN') : item.quantity.toFixed(1).replace(/\B(?=(\d{3})+(?!\d))/g, ',')} {item.unit}
                       </span>
                     </div>
                     {item.supplier && (

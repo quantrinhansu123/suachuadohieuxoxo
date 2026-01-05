@@ -576,15 +576,15 @@ export const Services: React.FC = () => {
   // Lọc dịch vụ theo tìm kiếm, danh mục và cấp độ
   const filteredServices = useMemo(() => {
     let result = [...services];
-
+    
     if (searchText.trim()) {
       const search = searchText.toLowerCase();
-      result = result.filter(s =>
+      result = result.filter(s => 
         s.name.toLowerCase().includes(search) ||
         s.desc.toLowerCase().includes(search)
       );
     }
-
+    
     if (categoryFilter !== 'all') {
       result = result.filter(s => s.category === categoryFilter);
     }
@@ -595,7 +595,7 @@ export const Services: React.FC = () => {
         return s.categoryPath.includes(selectedCategory);
       });
     }
-
+    
     return result;
   }, [services, searchText, categoryFilter, selectedCategory]);
 
@@ -828,7 +828,7 @@ export const Services: React.FC = () => {
                 </div>
 
                 <div className="border-t border-neutral-800 pt-6 space-y-4">
-                  <div>
+        <div>
                     <label className="block text-sm font-medium text-slate-400 mb-2">Quy trình xử lý</label>
                     {(() => {
                       // Xử lý workflows có thể là mảng object {id, order} hoặc mảng string
@@ -857,7 +857,7 @@ export const Services: React.FC = () => {
                                 <div key={w.id} className={`px-3 py-2 rounded-lg border flex items-center gap-3 ${workflow.color}`}>
                                   <div className="w-6 h-6 rounded-full bg-gold-600/20 border border-gold-600/50 flex items-center justify-center text-gold-500 font-bold text-xs">
                                     {w.order}
-                                  </div>
+        </div>
                                   <Layers size={14} />
                                   <span className="font-semibold text-sm">{workflow.label}</span>
                                   <span className="text-xs opacity-75">({workflow.department})</span>
@@ -879,16 +879,16 @@ export const Services: React.FC = () => {
               </div>
 
               <div className="sticky bottom-0 bg-neutral-900 border-t border-neutral-800 p-6 flex gap-3 justify-end">
-                <button
-                  onClick={() => {
+        <button 
+          onClick={() => {
                     setShowViewModal(false);
                     setSelectedService(null);
-                  }}
+          }}
                   className="px-6 py-2.5 border border-neutral-700 bg-neutral-800 text-slate-300 rounded-lg hover:bg-neutral-700 transition-colors"
-                >
+        >
                   Đóng
-                </button>
-              </div>
+        </button>
+      </div>
             </div>
           </div>
         )}
@@ -926,14 +926,14 @@ export const Services: React.FC = () => {
                   <label className="block text-sm font-medium text-slate-400 mb-2">
                     Tên dịch vụ <span className="text-red-500">*</span>
                   </label>
-                  <input
-                    type="text"
+          <input 
+            type="text" 
                     value={newService.name}
                     onChange={(e) => setNewService({ ...newService, name: e.target.value })}
                     placeholder="VD: Spa Túi Xách Premium"
                     className="w-full px-4 py-2 bg-neutral-800 border border-neutral-700 rounded-lg text-slate-200 focus:ring-2 focus:ring-gold-500 outline-none transition-all placeholder-slate-600"
-                  />
-                </div>
+          />
+        </div>
 
                 <div className="grid grid-cols-1 md:grid-cols-3 gap-4">
                   <div>
@@ -970,7 +970,7 @@ export const Services: React.FC = () => {
                                 </button>
                               </div>
                             ) : (
-                              <select
+          <select
                                 value={categoryPath[level] || ''}
                                 onChange={(e) => {
                                   if (e.target.value === '__NEW__') toggleCustom(level, true);
@@ -983,9 +983,9 @@ export const Services: React.FC = () => {
                                   <option key={opt.id} value={opt.id}>{opt.name}</option>
                                 ))}
                                 <option value="__NEW__" className="text-gold-500 font-semibold">+ ➕ Thêm mới {levelName}</option>
-                              </select>
+          </select>
                             )}
-                          </div>
+        </div>
                         );
                       })}
                     </div>
@@ -996,7 +996,7 @@ export const Services: React.FC = () => {
                       className="w-full px-4 py-2 bg-neutral-900 border border-neutral-800 rounded-lg text-slate-500 text-sm italic"
                       placeholder="Danh mục đã chọn..."
                     />
-                  </div>
+      </div>
 
 
 
@@ -1011,7 +1011,7 @@ export const Services: React.FC = () => {
                       placeholder="1500000"
                       className="w-full px-4 py-2 bg-neutral-800 border border-neutral-700 rounded-lg text-slate-200 focus:ring-2 focus:ring-gold-500 outline-none transition-all placeholder-slate-600"
                     />
-                  </div>
+          </div>
                 </div>
 
                 <div>
@@ -1051,7 +1051,7 @@ export const Services: React.FC = () => {
                         })
                         .map(wf => {
                           const isSelected = newService.workflows.some(w => w.id === wf.id);
-                          return (
+            return (
                             <label key={wf.id} className="flex items-start gap-3 p-2 hover:bg-neutral-800 rounded-lg cursor-pointer transition-colors">
                               <input
                                 type="checkbox"
@@ -1110,8 +1110,8 @@ export const Services: React.FC = () => {
                                 <div className="w-8 h-8 rounded-full bg-gold-600/20 border border-gold-600/50 flex items-center justify-center text-gold-500 font-bold text-sm">
                                   {w.order}
                                 </div>
-                              </div>
-                              <div className="flex-1">
+                    </div>
+                    <div className="flex-1">
                                 <div className="flex items-center gap-2">
                                   <Layers size={14} className="text-gold-500" />
                                   <span className="text-sm font-medium text-slate-300">{wf.label}</span>
@@ -1155,16 +1155,38 @@ export const Services: React.FC = () => {
                   )}
                 </div>
 
-                <div>
-                  <label className="block text-sm font-medium text-slate-400 mb-2">URL hình ảnh</label>
+                            <div>
+                  <label className="block text-sm font-medium text-slate-400 mb-2">Hình ảnh</label>
                   <input
-                    type="url"
-                    value={newService.image}
-                    onChange={(e) => setNewService({ ...newService, image: e.target.value })}
-                    placeholder="https://..."
-                    className="w-full px-4 py-2 bg-neutral-800 border border-neutral-700 rounded-lg text-slate-200 focus:ring-2 focus:ring-gold-500 outline-none transition-all placeholder-slate-600"
+                    type="file"
+                    accept="image/*"
+                    onChange={(e) => {
+                      const file = e.target.files?.[0];
+                      if (file) {
+                        if (!file.type.startsWith('image/')) {
+                          alert('Vui lòng chọn file ảnh!');
+                          return;
+                        }
+                        if (file.size > 5 * 1024 * 1024) {
+                          alert('File quá lớn! Vui lòng chọn file nhỏ hơn 5MB.');
+                          return;
+                        }
+                        const reader = new FileReader();
+                        reader.onload = (event) => {
+                          const base64 = event.target?.result as string;
+                          setNewService({ ...newService, image: base64 });
+                        };
+                        reader.readAsDataURL(file);
+                      }
+                    }}
+                    className="w-full px-4 py-2 bg-neutral-800 border border-neutral-700 rounded-lg text-slate-200 focus:ring-2 focus:ring-gold-500 outline-none transition-all file:mr-4 file:py-2 file:px-4 file:rounded-lg file:border-0 file:text-sm file:font-semibold file:bg-gold-600 file:text-black hover:file:bg-gold-500 file:cursor-pointer"
                   />
-                </div>
+                  {newService.image && (
+                    <div className="mt-2">
+                      <img src={newService.image} alt="Preview" className="w-32 h-32 rounded-lg object-cover border border-neutral-700" />
+                                </div>
+                  )}
+                            </div>
 
                 <div>
                   <label className="block text-sm font-medium text-slate-400 mb-2">Mô tả</label>
@@ -1179,7 +1201,7 @@ export const Services: React.FC = () => {
               </div>
 
               <div className="sticky bottom-0 bg-neutral-900 border-t border-neutral-800 p-6 flex gap-3 justify-end">
-                <button
+                            <button 
                   onClick={() => {
                     setShowEditModal(false);
                     setSelectedService(null);
@@ -1204,8 +1226,8 @@ export const Services: React.FC = () => {
                   className="px-6 py-2.5 bg-gold-600 hover:bg-gold-700 text-black font-medium rounded-lg shadow-lg shadow-gold-900/20 transition-all"
                 >
                   Cập Nhật
-                </button>
-              </div>
+                            </button>
+                        </div>
             </div>
           </div>
         )}
@@ -1377,22 +1399,22 @@ export const Services: React.FC = () => {
                                 className="mt-1 w-4 h-4 text-gold-600 rounded focus:ring-gold-500 border-neutral-600 bg-neutral-900 accent-gold-600 cursor-pointer"
                               />
                               <div className="flex-1">
-                                <div className="flex items-center gap-2">
+                            <div className="flex items-center gap-2">
                                   <Layers size={14} className="text-gold-500" />
                                   <span className="text-sm font-medium text-slate-300">{wf.label}</span>
                                   <span className={`px-2 py-0.5 rounded text-xs border ${wf.color}`}>
                                     {wf.department}
-                                  </span>
-                                </div>
+                                </span>
+                            </div>
                                 {wf.description && (
                                   <p className="text-xs text-slate-500 mt-1">{wf.description}</p>
                                 )}
-                              </div>
+                            </div>
                             </label>
                           );
                         })
                     )}
-                  </div>
+                        </div>
 
                   {/* Danh sách quy trình đã chọn với thứ tự */}
                   {newService.workflows.length > 0 && (
@@ -1447,23 +1469,45 @@ export const Services: React.FC = () => {
                                     <ArrowDown size={14} />
                                   </button>
                                 )}
-                              </div>
-                            </div>
-                          );
-                        })}
                     </div>
-                  )}
                 </div>
+            );
+        })}
+      </div>
+                  )}
+    </div>
 
                 <div>
-                  <label className="block text-sm font-medium text-slate-400 mb-2">URL hình ảnh</label>
+                  <label className="block text-sm font-medium text-slate-400 mb-2">Hình ảnh</label>
                   <input
-                    type="url"
-                    value={newService.image}
-                    onChange={(e) => setNewService({ ...newService, image: e.target.value })}
-                    placeholder="https://..."
-                    className="w-full px-4 py-2 bg-neutral-800 border border-neutral-700 rounded-lg text-slate-200 focus:ring-2 focus:ring-gold-500 outline-none transition-all placeholder-slate-600"
+                    type="file"
+                    accept="image/*"
+                    onChange={(e) => {
+                      const file = e.target.files?.[0];
+                      if (file) {
+                        if (!file.type.startsWith('image/')) {
+                          alert('Vui lòng chọn file ảnh!');
+                          return;
+                        }
+                        if (file.size > 5 * 1024 * 1024) {
+                          alert('File quá lớn! Vui lòng chọn file nhỏ hơn 5MB.');
+                          return;
+                        }
+                        const reader = new FileReader();
+                        reader.onload = (event) => {
+                          const base64 = event.target?.result as string;
+                          setNewService({ ...newService, image: base64 });
+                        };
+                        reader.readAsDataURL(file);
+                      }
+                    }}
+                    className="w-full px-4 py-2 bg-neutral-800 border border-neutral-700 rounded-lg text-slate-200 focus:ring-2 focus:ring-gold-500 outline-none transition-all file:mr-4 file:py-2 file:px-4 file:rounded-lg file:border-0 file:text-sm file:font-semibold file:bg-gold-600 file:text-black hover:file:bg-gold-500 file:cursor-pointer"
                   />
+                  {newService.image && (
+                    <div className="mt-2">
+                      <img src={newService.image} alt="Preview" className="w-32 h-32 rounded-lg object-cover border border-neutral-700" />
+                    </div>
+                  )}
                 </div>
 
                 <div>

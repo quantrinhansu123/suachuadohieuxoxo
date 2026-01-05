@@ -12,6 +12,14 @@ const formatCurrency = (amount: number) => {
   return new Intl.NumberFormat('vi-VN', { style: 'currency', currency: 'VND' }).format(amount);
 };
 
+// Utility for formatting numbers with thousand separators
+const formatNumber = (num: number | string | undefined | null): string => {
+  if (num === undefined || num === null) return '0';
+  const numValue = typeof num === 'string' ? parseFloat(num) : num;
+  if (isNaN(numValue)) return '0';
+  return numValue.toLocaleString('vi-VN');
+};
+
 // MultiSelect Dropdown Filter
 const MultiSelectFilter: React.FC<{
   label: string;
@@ -407,11 +415,24 @@ export const Orders: React.FC = () => {
       }
     }
 
+    const orderId = `ORD-${new Date().getFullYear()}-${Date.now().toString().slice(-4)}`;
+    
+    // Update item IDs to format: {orderId}-{serviceId}
+    const itemsWithUpdatedIds = itemsWithAssignment.map(item => {
+      if (item.serviceId) {
+        return {
+          ...item,
+          id: `${orderId}-${item.serviceId}`
+        };
+      }
+      return item;
+    });
+
     const newOrder: Order = {
-      id: `ORD-${new Date().getFullYear()}-${Date.now().toString().slice(-4)}`,
+      id: orderId,
       customerId: selectedCustomerId,
       customerName: customer?.name || 'Khách lẻ',
-      items: itemsWithAssignment,
+      items: itemsWithUpdatedIds,
       totalAmount: totalAmount,
       deposit: 0,
       status: OrderStatus.PENDING,
@@ -529,10 +550,15 @@ export const Orders: React.FC = () => {
     const customer = customers.find(c => c.id === editSelectedCustomerId);
     const totalAmount = editOrderItems.reduce((acc, item) => acc + item.price, 0);
 
-    // Clean items to remove undefined values
+    // Clean items to remove undefined values and update IDs to format: {orderId}-{serviceId}
     const cleanedItems = editOrderItems.map(item => {
+      // Generate ID as {orderId}-{serviceId} if serviceId exists
+      const itemId = item.serviceId 
+        ? `${editingOrder.id}-${item.serviceId}`
+        : item.id;
+
       const cleaned: any = {
-        id: item.id,
+        id: itemId,
         name: item.name,
         type: item.type,
         price: item.price,
@@ -806,17 +832,54 @@ export const Orders: React.FC = () => {
                                 {statusLabel}
                               </span>
                             </div>
-                            <p className="text-sm text-slate-500 mt-1">{item.type} • x{item.quantity || 1}</p>
+                            <p className="text-sm text-slate-500 mt-1">{item.type} • x{formatNumber(item.quantity || 1)}</p>
                             <div className="mt-2 flex items-center gap-2 text-xs text-gold-600 font-medium">
                               <QrCode size={14} />
                               <span>{item.id}</span>
                             </div>
                             {!item.isProduct && item.serviceId && (
-                              <div className="mt-2 text-[10px] text-slate-600 italic">
-                                Đã trừ kho theo định mức quy trình
-                              </div>
+                              <>
+                                <div className="mt-2 text-[10px] text-slate-600 italic">
+                                  Đã trừ kho theo định mức quy trình
+                                </div>
+                                {(() => {
+                                  const service = services.find(s => s.id === item.serviceId);
+                                  if (service && service.workflows && Array.isArray(service.workflows) && service.workflows.length > 0) {
+                                    const allWorkflows = service.workflows
+                                      .map(wf => {
+                                        const wfDef = workflows.find(w => w.id === wf.id);
+                                        return wfDef ? { id: wfDef.id, label: wfDef.label, order: wf.order, isCurrent: wf.id === item.workflowId } : null;
+                                      })
+                                      .filter(w => w !== null)
+                                      .sort((a, b) => (a?.order || 0) - (b?.order || 0));
+                                    
+                                    return (
+                                      <div className="mt-2 space-y-1">
+                                        <div className="text-[10px] text-slate-500 font-semibold uppercase">Tất cả quy trình:</div>
+                                        {allWorkflows.map((wf, idx) => (
+                                          <div key={wf?.id || idx} className={`text-[10px] ${wf?.isCurrent ? 'text-gold-500 font-bold' : 'text-blue-400'}`}>
+                                            {wf?.isCurrent && '→ '}
+                                            {wf?.order}. {wf?.label}
+                                            {wf?.isCurrent && ' (Đang thực hiện)'}
+                                          </div>
+                                        ))}
+                                      </div>
+                                    );
+                                  }
+                                  // Fallback: show current workflow if no service workflows
+                                  if (item.workflowId) {
+                                    const currentWf = workflows.find(w => w.id === item.workflowId);
+                                    return (
+                                      <div className="mt-1 text-[10px] text-blue-500">
+                                        Quy trình: {currentWf?.label || 'Unknown'}
+                                      </div>
+                                    );
+                                  }
+                                  return null;
+                                })()}
+                              </>
                             )}
-                            {item.workflowId && (
+                            {item.workflowId && !item.serviceId && (
                               <div className="mt-1 text-[10px] text-blue-500">
                                 Quy trình: {workflows.find(w => w.id === item.workflowId)?.label || 'Unknown'}
                               </div>
@@ -1030,7 +1093,7 @@ export const Orders: React.FC = () => {
                         <option value="">-- Chọn --</option>
                         {selectedItemType === 'SERVICE'
                           ? services.map(s => <option key={s.id} value={s.id}>{s.name} (Giá gốc: {s.price.toLocaleString()})</option>)
-                          : products.map(p => <option key={p.id} value={p.id}>{p.name} (Tồn: {p.stock})</option>)
+                          : products.map(p => <option key={p.id} value={p.id}>{p.name} (Tồn: {formatNumber(p.stock)})</option>)
                         }
                       </select>
                     </div>
@@ -1185,7 +1248,7 @@ export const Orders: React.FC = () => {
                         <option value="">-- Chọn --</option>
                         {editSelectedItemType === 'SERVICE'
                           ? services.map(s => <option key={s.id} value={s.id}>{s.name} (Giá gốc: {s.price.toLocaleString()})</option>)
-                          : products.map(p => <option key={p.id} value={p.id}>{p.name} (Tồn: {p.stock})</option>)
+                          : products.map(p => <option key={p.id} value={p.id}>{p.name} (Tồn: {formatNumber(p.stock)})</option>)
                         }
                       </select>
                     </div>
@@ -1211,25 +1274,53 @@ export const Orders: React.FC = () => {
 
                 {/* Items List (Edit) */}
                 <div className="space-y-2">
-                  {editOrderItems.map((item, idx) => (
-                    <div key={idx} className="flex justify-between items-center p-3 bg-neutral-800/50 rounded-lg border border-neutral-700 text-sm">
-                      <div className="flex items-center gap-3">
-                        <div className="w-8 h-8 rounded bg-neutral-700 flex items-center justify-center text-slate-400">
-                          {idx + 1}
+                  {editOrderItems.map((item, idx) => {
+                    const service = item.serviceId ? services.find(s => s.id === item.serviceId) : null;
+                    const workflow = item.workflowId ? workflows.find(w => w.id === item.workflowId) : null;
+                    
+                    return (
+                      <div key={idx} className="p-3 bg-neutral-800/50 rounded-lg border border-neutral-700 text-sm">
+                        <div className="flex justify-between items-center">
+                          <div className="flex items-center gap-3">
+                            <div className="w-8 h-8 rounded bg-neutral-700 flex items-center justify-center text-slate-400">
+                              {idx + 1}
+                            </div>
+                            <div>
+                              <div className="font-medium text-slate-200">{item.name}</div>
+                              <div className="text-xs text-slate-500">{item.type}</div>
+                            </div>
+                          </div>
+                          <div className="flex items-center gap-4">
+                            <span className="font-medium text-slate-300">{item.price.toLocaleString()} ₫</span>
+                            <button onClick={() => handleEditRemoveItem(idx)} className="p-1 hover:text-red-500 text-slate-500">
+                              <Trash2 size={16} />
+                            </button>
+                          </div>
                         </div>
-                        <div>
-                          <div className="font-medium text-slate-200">{item.name}</div>
-                          <div className="text-xs text-slate-500">{item.type}</div>
-                        </div>
+                        
+                        {/* Hiển thị thông tin quy trình đã chọn */}
+                        {!item.isProduct && (
+                          <div className="mt-2 pt-2 border-t border-neutral-700 space-y-1">
+                            {item.serviceId && service && (
+                              <div className="text-xs text-slate-400">
+                                <span className="text-slate-500">Dịch vụ:</span> {service.name}
+                              </div>
+                            )}
+                            {item.workflowId && workflow && (
+                              <div className="text-xs text-blue-400">
+                                <span className="text-slate-500">Quy trình:</span> {workflow.label}
+                              </div>
+                            )}
+                            {item.status && (
+                              <div className="text-xs text-slate-400">
+                                <span className="text-slate-500">Trạng thái:</span> {item.status}
+                              </div>
+                            )}
+                          </div>
+                        )}
                       </div>
-                      <div className="flex items-center gap-4">
-                        <span className="font-medium text-slate-300">{item.price.toLocaleString()} ₫</span>
-                        <button onClick={() => handleEditRemoveItem(idx)} className="p-1 hover:text-red-500 text-slate-500">
-                          <Trash2 size={16} />
-                        </button>
-                      </div>
-                    </div>
-                  ))}
+                    );
+                  })}
                 </div>
               </div>
 

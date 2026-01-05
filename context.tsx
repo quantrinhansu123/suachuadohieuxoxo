@@ -50,6 +50,7 @@ export const AppProvider: React.FC<{ children: ReactNode }> = ({ children }) => 
   const [members, setMembers] = useState<Member[]>([]);
   const [products, setProducts] = useState<Product[]>([]);
   const [customers, setCustomers] = useState<Customer[]>([]);
+  const [workflows, setWorkflows] = useState<WorkflowDefinition[]>([]);
   const [isLoading, setIsLoading] = useState(true);
 
   // Helper function để chuyển đổi từ tiếng Việt sang tiếng Anh
@@ -237,30 +238,49 @@ export const AppProvider: React.FC<{ children: ReactNode }> = ({ children }) => 
     // Lưu đơn hàng vào Firebase với Key là ID của đơn
     await set(ref(db, `${DB_PATHS.ORDERS}/${newOrder.id}`), cleanedOrder);
 
-    // Tính toán trừ kho
+    // Tính toán trừ kho dựa trên workflowId của item
     const currentInventory = [...inventory];
     let inventoryUpdated = false;
 
     newOrder.items.forEach(item => {
-      if (!item.isProduct && item.serviceId) {
-        const serviceDef = SERVICE_CATALOG.find(s => s.id === item.serviceId);
-        if (serviceDef) {
-          const workflow = MOCK_WORKFLOWS.find(w => w.id === serviceDef.workflowId);
-          if (workflow && workflow.materials) {
-            workflow.materials.forEach(mat => {
-              const invItem = currentInventory.find(i => i.id === mat.inventoryItemId);
-              if (invItem) {
-                const deductAmount = mat.quantity * item.quantity;
-                invItem.quantity = Math.max(0, invItem.quantity - deductAmount);
+      // Chỉ trừ kho cho items không phải product và có workflowId
+      if (!item.isProduct && item.workflowId) {
+        // Tìm workflow từ Firebase workflows
+        const workflow = workflows.find(w => w.id === item.workflowId);
+        
+        if (workflow && workflow.materials && Array.isArray(workflow.materials)) {
+          workflow.materials.forEach(mat => {
+            // Support both inventoryItemId and itemId for backward compatibility
+            const inventoryItemId = mat.inventoryItemId || mat.itemId;
+            const invItem = currentInventory.find(i => i.id === inventoryItemId);
+            
+            if (invItem && mat.quantity) {
+              const deductAmount = mat.quantity * (item.quantity || 1);
+              const newQuantity = Math.max(0, invItem.quantity - deductAmount);
 
-                // Cập nhật trực tiếp item trong kho lên Firebase
-                update(ref(db, `${DB_PATHS.INVENTORY}/${invItem.id}`), {
-                  quantity: invItem.quantity
-                });
-                inventoryUpdated = true;
-              }
-            });
-          }
+              // Cập nhật trực tiếp item trong kho lên Firebase
+              update(ref(db, `${DB_PATHS.INVENTORY}/${invItem.id}`), {
+                quantity: newQuantity
+              });
+              inventoryUpdated = true;
+              
+              console.log('📦 Trừ kho:', {
+                inventoryItem: invItem.name,
+                inventoryItemId: invItem.id,
+                deductAmount,
+                oldQuantity: invItem.quantity,
+                newQuantity,
+                workflowId: item.workflowId,
+                workflowName: workflow.label
+              });
+            }
+          });
+        } else {
+          console.warn('⚠️ Không tìm thấy workflow hoặc materials:', {
+            workflowId: item.workflowId,
+            workflowFound: !!workflow,
+            hasMaterials: workflow?.materials ? true : false
+          });
         }
       }
     });
@@ -353,7 +373,19 @@ export const AppProvider: React.FC<{ children: ReactNode }> = ({ children }) => 
     const order = orders.find(o => o.id === orderId);
     if (!order) return;
 
-    const itemIndex = order.items.findIndex(i => i.id === itemId);
+    // Find item by ID (could be old format or new format {orderId}-{serviceId})
+    let itemIndex = order.items.findIndex(i => i.id === itemId);
+    
+    // If not found, try to find by serviceId if itemId is in format {orderId}-{serviceId}
+    if (itemIndex === -1 && itemId.includes('-')) {
+      const parts = itemId.split('-');
+      if (parts.length >= 2) {
+        // Try to find by serviceId (last part after last dash)
+        const serviceId = parts[parts.length - 1];
+        itemIndex = order.items.findIndex(i => i.serviceId === serviceId);
+      }
+    }
+    
     if (itemIndex === -1) return;
 
     const item = order.items[itemIndex];
@@ -396,8 +428,14 @@ export const AppProvider: React.FC<{ children: ReactNode }> = ({ children }) => 
       });
     }
 
+    // Ensure item ID is in format {orderId}-{serviceId} if serviceId exists
+    const finalItemId = item.serviceId 
+      ? `${orderId}-${item.serviceId}`
+      : item.id;
+
     // Cập nhật lên Firebase (chỉ cập nhật các trường thay đổi của item cụ thể)
     const updates: any = {};
+    updates[`${DB_PATHS.ORDERS}/${orderId}/items/${itemIndex}/id`] = finalItemId;
     updates[`${DB_PATHS.ORDERS}/${orderId}/items/${itemIndex}/status`] = newStatus;
     updates[`${DB_PATHS.ORDERS}/${orderId}/items/${itemIndex}/history`] = newHistory;
     updates[`${DB_PATHS.ORDERS}/${orderId}/items/${itemIndex}/lastUpdated`] = now;
@@ -443,7 +481,9 @@ export const AppProvider: React.FC<{ children: ReactNode }> = ({ children }) => 
 
   // Cập nhật một vật tư cụ thể
   const updateInventoryItem = async (itemId: string, updatedItem: InventoryItem) => {
-    await set(ref(db, `${DB_PATHS.INVENTORY}/${itemId}`), updatedItem);
+    // Remove undefined values before saving to Firebase
+    const cleanedItem = removeUndefined(updatedItem);
+    await set(ref(db, `${DB_PATHS.INVENTORY}/${itemId}`), cleanedItem);
   };
 
   // Xóa một vật tư
@@ -453,7 +493,9 @@ export const AppProvider: React.FC<{ children: ReactNode }> = ({ children }) => 
 
   // Thêm vật tư mới
   const addInventoryItem = async (newItem: InventoryItem) => {
-    await set(ref(db, `${DB_PATHS.INVENTORY}/${newItem.id}`), newItem);
+    // Remove undefined values before saving to Firebase
+    const cleanedItem = removeUndefined(newItem);
+    await set(ref(db, `${DB_PATHS.INVENTORY}/${newItem.id}`), cleanedItem);
   };
 
   // Cập nhật nhân sự

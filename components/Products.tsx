@@ -353,14 +353,36 @@ export const Products: React.FC = () => {
                 </div>
                 
                 <div>
-                  <label className="block text-sm font-medium text-slate-400 mb-2">URL hình ảnh</label>
+                  <label className="block text-sm font-medium text-slate-400 mb-2">Hình ảnh</label>
                   <input
-                    type="url"
-                    value={newProduct.image}
-                    onChange={(e) => setNewProduct({...newProduct, image: e.target.value})}
-                    placeholder="https://..."
-                    className="w-full px-4 py-2 bg-neutral-800 border border-neutral-700 rounded-lg text-slate-200 focus:ring-2 focus:ring-gold-500 outline-none transition-all placeholder-slate-600"
+                    type="file"
+                    accept="image/*"
+                    onChange={(e) => {
+                      const file = e.target.files?.[0];
+                      if (file) {
+                        if (!file.type.startsWith('image/')) {
+                          alert('Vui lòng chọn file ảnh!');
+                          return;
+                        }
+                        if (file.size > 5 * 1024 * 1024) {
+                          alert('File quá lớn! Vui lòng chọn file nhỏ hơn 5MB.');
+                          return;
+                        }
+                        const reader = new FileReader();
+                        reader.onload = (event) => {
+                          const base64 = event.target?.result as string;
+                          setNewProduct({...newProduct, image: base64});
+                        };
+                        reader.readAsDataURL(file);
+                      }
+                    }}
+                    className="w-full px-4 py-2 bg-neutral-800 border border-neutral-700 rounded-lg text-slate-200 focus:ring-2 focus:ring-gold-500 outline-none transition-all file:mr-4 file:py-2 file:px-4 file:rounded-lg file:border-0 file:text-sm file:font-semibold file:bg-gold-600 file:text-black hover:file:bg-gold-500 file:cursor-pointer"
                   />
+                  {newProduct.image && (
+                    <div className="mt-2">
+                      <img src={newProduct.image} alt="Preview" className="w-32 h-32 rounded-lg object-cover border border-neutral-700" />
+                    </div>
+                  )}
                 </div>
               </div>
               
@@ -468,14 +490,36 @@ export const Products: React.FC = () => {
                 </div>
                 
                 <div>
-                  <label className="block text-sm font-medium text-slate-400 mb-2">URL hình ảnh</label>
+                  <label className="block text-sm font-medium text-slate-400 mb-2">Hình ảnh</label>
                   <input
-                    type="url"
-                    value={editingProduct.image}
-                    onChange={(e) => setEditingProduct({...editingProduct, image: e.target.value})}
-                    placeholder="https://..."
-                    className="w-full px-4 py-2 bg-neutral-800 border border-neutral-700 rounded-lg text-slate-200 focus:ring-2 focus:ring-gold-500 outline-none transition-all placeholder-slate-600"
+                    type="file"
+                    accept="image/*"
+                    onChange={(e) => {
+                      const file = e.target.files?.[0];
+                      if (file) {
+                        if (!file.type.startsWith('image/')) {
+                          alert('Vui lòng chọn file ảnh!');
+                          return;
+                        }
+                        if (file.size > 5 * 1024 * 1024) {
+                          alert('File quá lớn! Vui lòng chọn file nhỏ hơn 5MB.');
+                          return;
+                        }
+                        const reader = new FileReader();
+                        reader.onload = (event) => {
+                          const base64 = event.target?.result as string;
+                          setEditingProduct({...editingProduct, image: base64});
+                        };
+                        reader.readAsDataURL(file);
+                      }
+                    }}
+                    className="w-full px-4 py-2 bg-neutral-800 border border-neutral-700 rounded-lg text-slate-200 focus:ring-2 focus:ring-gold-500 outline-none transition-all file:mr-4 file:py-2 file:px-4 file:rounded-lg file:border-0 file:text-sm file:font-semibold file:bg-gold-600 file:text-black hover:file:bg-gold-500 file:cursor-pointer"
                   />
+                  {editingProduct.image && (
+                    <div className="mt-2">
+                      <img src={editingProduct.image} alt="Preview" className="w-32 h-32 rounded-lg object-cover border border-neutral-700" />
+                    </div>
+                  )}
                 </div>
               </div>
               
@@ -568,7 +612,7 @@ export const Products: React.FC = () => {
                 className="w-full h-full object-cover opacity-80" 
               />
               <div className="absolute top-1 right-1 bg-neutral-950/90 backdrop-blur px-1.5 py-0.5 rounded text-[10px] font-bold text-gold-500 shadow-sm border border-neutral-800">
-                {product.stock}
+                {product.stock.toLocaleString('vi-VN')}
               </div>
             </div>
             <div className="flex-1">
@@ -582,7 +626,7 @@ export const Products: React.FC = () => {
                 </div>
                 <ActionMenu
                   itemName={product.name}
-                  onView={() => alert(`Xem chi tiết sản phẩm: ${product.name}\n\nID: ${product.id}\nDanh mục: ${product.category}\nGiá: ${product.price.toLocaleString()} ₫\nTồn kho: ${product.stock}\nMô tả: ${product.desc || 'Không có'}`)}
+                  onView={() => alert(`Xem chi tiết sản phẩm: ${product.name}\n\nID: ${product.id}\nDanh mục: ${product.category}\nGiá: ${product.price.toLocaleString('vi-VN')} ₫\nTồn kho: ${product.stock.toLocaleString('vi-VN')}\nMô tả: ${product.desc || 'Không có'}`)}
                   onEdit={() => {
                     setEditingProduct({
                       ...product,
@@ -599,7 +643,7 @@ export const Products: React.FC = () => {
               <div className="mt-4 flex items-center justify-between">
                 <div className="flex items-center gap-2">
                   <span className="text-xs text-slate-500 uppercase font-semibold">Tồn kho:</span>
-                  <span className="text-xs font-medium text-slate-300">{product.stock} sản phẩm</span>
+                  <span className="text-xs font-medium text-slate-300">{product.stock.toLocaleString('vi-VN')} sản phẩm</span>
                 </div>
                 <div className="font-bold text-lg text-gold-500">
                   {product.price.toLocaleString()} ₫
