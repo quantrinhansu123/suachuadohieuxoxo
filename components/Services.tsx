@@ -8,137 +8,7 @@ import { db, DB_PATHS } from '../firebase';
 import { ServiceCatalogItem, WorkflowDefinition, ServiceCategory } from '../types';
 
 // Define 4-level category structure
-const CATEGORY_TREE: ServiceCategory[] = [
-  {
-    id: 'cat-1',
-    name: 'Chăm Sóc Túi Xách & Ví',
-    level: 1,
-    color: 'text-purple-400',
-    children: [
-      {
-        id: 'cat-1-1',
-        name: 'Dịch Vụ Spa',
-        level: 2,
-        parentId: 'cat-1',
-        children: [
-          {
-            id: 'cat-1-1-1',
-            name: 'Túi Xách',
-            level: 3,
-            parentId: 'cat-1-1',
-            children: [
-              { id: 'cat-1-1-1-1', name: 'Spa Basic', level: 4, parentId: 'cat-1-1-1' },
-              { id: 'cat-1-1-1-2', name: 'Spa Premium', level: 4, parentId: 'cat-1-1-1' },
-              { id: 'cat-1-1-1-3', name: 'Deep Clean', level: 4, parentId: 'cat-1-1-1' },
-            ]
-          },
-          {
-            id: 'cat-1-1-2',
-            name: 'Ví',
-            level: 3,
-            parentId: 'cat-1-1',
-            children: [
-              { id: 'cat-1-1-2-1', name: 'Vệ Sinh Ví', level: 4, parentId: 'cat-1-1-2' },
-              { id: 'cat-1-1-2-2', name: 'Phục Hồi Ví', level: 4, parentId: 'cat-1-1-2' },
-            ]
-          }
-        ]
-      },
-      {
-        id: 'cat-1-2',
-        name: 'Sửa Chữa & Phục Hồi',
-        level: 2,
-        parentId: 'cat-1',
-        children: [
-          {
-            id: 'cat-1-2-1',
-            name: 'Túi Xách',
-            level: 3,
-            parentId: 'cat-1-2',
-            children: [
-              { id: 'cat-1-2-1-1', name: 'Retouch (Dặm Màu)', level: 4, parentId: 'cat-1-2-1' },
-              { id: 'cat-1-2-1-2', name: 'Recolor (Đổi Màu)', level: 4, parentId: 'cat-1-2-1' },
-              { id: 'cat-1-2-1-3', name: 'Sửa Khóa/Dây', level: 4, parentId: 'cat-1-2-1' },
-            ]
-          }
-        ]
-      },
-      {
-        id: 'cat-1-3',
-        name: 'Xi Mạ & Nâng Cấp',
-        level: 2,
-        parentId: 'cat-1',
-        children: [
-          {
-            id: 'cat-1-3-1',
-            name: 'Xi Mạ Vàng',
-            level: 3,
-            parentId: 'cat-1-3',
-            children: [
-              { id: 'cat-1-3-1-1', name: 'Mạ Logo 18K', level: 4, parentId: 'cat-1-3-1' },
-              { id: 'cat-1-3-1-2', name: 'Mạ Logo 24K', level: 4, parentId: 'cat-1-3-1' },
-              { id: 'cat-1-3-1-3', name: 'Mạ Chi Tiết Kim Loại', level: 4, parentId: 'cat-1-3-1' },
-            ]
-          }
-        ]
-      }
-    ]
-  },
-  {
-    id: 'cat-2',
-    name: 'Chăm Sóc Giày Dép',
-    level: 1,
-    color: 'text-blue-400',
-    children: [
-      {
-        id: 'cat-2-1',
-        name: 'Vệ Sinh Giày',
-        level: 2,
-        parentId: 'cat-2',
-        children: [
-          {
-            id: 'cat-2-1-1',
-            name: 'Sneaker',
-            level: 3,
-            parentId: 'cat-2-1',
-            children: [
-              { id: 'cat-2-1-1-1', name: 'Vệ Sinh Cơ Bản', level: 4, parentId: 'cat-2-1-1' },
-              { id: 'cat-2-1-1-2', name: 'Deep Clean', level: 4, parentId: 'cat-2-1-1' },
-            ]
-          },
-          {
-            id: 'cat-2-1-2',
-            name: 'Giày Tây',
-            level: 3,
-            parentId: 'cat-2-1',
-            children: [
-              { id: 'cat-2-1-2-1', name: 'Vệ Sinh & Đánh Bóng', level: 4, parentId: 'cat-2-1-2' },
-              { id: 'cat-2-1-2-2', name: 'Patina', level: 4, parentId: 'cat-2-1-2' },
-            ]
-          }
-        ]
-      },
-      {
-        id: 'cat-2-2',
-        name: 'Sửa Chữa Giày',
-        level: 2,
-        parentId: 'cat-2',
-        children: [
-          {
-            id: 'cat-2-2-1',
-            name: 'Thay Đế',
-            level: 3,
-            parentId: 'cat-2-2',
-            children: [
-              { id: 'cat-2-2-1-1', name: 'Dán Đế Vibram', level: 4, parentId: 'cat-2-2-1' },
-              { id: 'cat-2-2-1-2', name: 'Thay Đế Cao Su', level: 4, parentId: 'cat-2-2-1' },
-            ]
-          }
-        ]
-      }
-    ]
-  }
-];
+const CATEGORY_TREE: ServiceCategory[] = [];
 
 // Action Menu Component around Portal
 const ActionMenu: React.FC<{
@@ -222,7 +92,27 @@ const CategorySidebar: React.FC<{
   selectedCategory: string | null;
   onSelectCategory: (categoryId: string | null) => void;
 }> = ({ categories, selectedCategory, onSelectCategory }) => {
-  const [expandedNodes, setExpandedNodes] = useState<Set<string>>(new Set(['cat-1', 'cat-2']));
+  // Auto-expand all level 1 categories
+  const [expandedNodes, setExpandedNodes] = useState<Set<string>>(() => {
+    const initial = new Set<string>();
+    categories.forEach(cat => {
+      if (cat.level === 1) initial.add(cat.id);
+    });
+    return initial;
+  });
+
+  // Update expanded nodes when categories change (only add new level 1 categories)
+  useEffect(() => {
+    setExpandedNodes(prev => {
+      const newExpanded = new Set(prev);
+      categories.forEach(cat => {
+        if (cat.level === 1) {
+          newExpanded.add(cat.id);
+        }
+      });
+      return newExpanded;
+    });
+  }, [categories.map(c => c.id).join(',')]);
 
   const toggleNode = (nodeId: string) => {
     const newExpanded = new Set(expandedNodes);
@@ -331,6 +221,95 @@ export const Services: React.FC = () => {
   });
   const [categoryPath, setCategoryPath] = useState<string[]>([]);
   const [customLevels, setCustomLevels] = useState<Record<number, boolean>>({});
+  const [dynamicCategories, setDynamicCategories] = useState<ServiceCategory[]>([]);
+
+  // Build dynamic categories from services
+  const buildDynamicCategories = (services: ServiceCatalogItem[]): ServiceCategory[] => {
+    const categoryMap = new Map<string, ServiceCategory>();
+    let customIdCounter = 10000; // Start from high number to avoid conflicts
+
+    services.forEach(service => {
+      if (!service.categoryPath || service.categoryPath.length === 0) return;
+
+      // Build category tree from path
+      let currentLevel = categoryMap;
+      let parentId: string | undefined = undefined;
+
+      service.categoryPath.forEach((pathItem, index) => {
+        const level = index + 1;
+        const categoryId = `custom-${customIdCounter++}`;
+        
+        // Check if category already exists at this level
+        let category: ServiceCategory | undefined;
+        for (const [id, cat] of categoryMap.entries()) {
+          if (cat.name === pathItem && cat.level === level && cat.parentId === parentId) {
+            category = cat;
+            break;
+          }
+        }
+
+        if (!category) {
+          category = {
+            id: categoryId,
+            name: pathItem,
+            level: level,
+            parentId: parentId,
+            children: [],
+            color: level === 1 ? 'text-emerald-400' : undefined
+          };
+          categoryMap.set(categoryId, category);
+        }
+
+        parentId = category.id;
+      });
+    });
+
+    // Build tree structure
+    const rootCategories: ServiceCategory[] = [];
+    const allCategories = Array.from(categoryMap.values());
+
+    allCategories.forEach(cat => {
+      if (cat.level === 1) {
+        // Check if root category already exists
+        if (!rootCategories.find(c => c.id === cat.id)) {
+          rootCategories.push(cat);
+        }
+      } else if (cat.parentId) {
+        const parent = allCategories.find(c => c.id === cat.parentId);
+        if (parent) {
+          if (!parent.children) parent.children = [];
+          // Check if child already exists
+          if (!parent.children.find(c => c.id === cat.id)) {
+            parent.children.push(cat);
+          }
+        }
+      }
+    });
+
+    return rootCategories;
+  };
+
+  // Merge static and dynamic categories
+  const mergedCategories = useMemo(() => {
+    // Check if dynamic categories already exist in static tree
+    const staticCategoryNames = new Set<string>();
+    const collectNames = (cats: ServiceCategory[]) => {
+      cats.forEach(cat => {
+        staticCategoryNames.add(cat.name);
+        if (cat.children) collectNames(cat.children);
+      });
+    };
+    collectNames(CATEGORY_TREE);
+
+    // Only add dynamic categories that don't exist in static tree
+    const newDynamicCategories = dynamicCategories.filter(dynCat => {
+      // Check if a category with same name and level exists in static tree
+      const exists = Array.from(staticCategoryNames).some(name => name === dynCat.name);
+      return !exists;
+    });
+
+    return [...CATEGORY_TREE, ...newDynamicCategories];
+  }, [dynamicCategories]);
 
   // Helper tìm path từ tên category
   const findCategoryPathByName = (name: string, nodes: ServiceCategory[]): string[] | null => {
@@ -358,13 +337,13 @@ export const Services: React.FC = () => {
 
   // Helper lấy danh sách category con dựa trên path
   const getCategoriesAtLevel = (level: number): ServiceCategory[] => {
-    if (level === 0) return CATEGORY_TREE;
+    if (level === 0) return mergedCategories;
 
-    let currentNodes = CATEGORY_TREE;
+    let currentNodes = mergedCategories;
     for (let i = 0; i < level; i++) {
       const nodeId = categoryPath[i];
       if (!nodeId) return [];
-      const node = currentNodes.find(n => n.id === nodeId);
+      const node = currentNodes.find(n => n.id === nodeId || n.name === nodeId);
       if (!node || !node.children) return [];
       currentNodes = node.children;
     }
@@ -382,12 +361,12 @@ export const Services: React.FC = () => {
       setCustomLevels(newCustoms);
     }
 
-    let currentNodes = CATEGORY_TREE;
+    let currentNodes = mergedCategories;
     let selectedName = '';
 
     for (let i = 0; i < newPath.length; i++) {
       const idOrName = newPath[i];
-      const node = currentNodes.find(n => n.id === idOrName);
+      const node = currentNodes.find(n => n.id === idOrName || n.name === idOrName);
       if (node) {
         selectedName = node.name;
         currentNodes = node.children || [];
@@ -428,7 +407,7 @@ export const Services: React.FC = () => {
           Object.keys(data).forEach(key => {
             const svc = data[key];
             const serviceId = svc.id || key;
-            const catPath = svc.categoryPath || findCategoryPathByName(svc.category || '', CATEGORY_TREE);
+            const catPath = svc.categoryPath || [];
             mergedServices.set(serviceId, {
               id: serviceId,
               name: svc.name || '',
@@ -443,10 +422,16 @@ export const Services: React.FC = () => {
           });
         }
 
-        setServices(Array.from(mergedServices.values()));
+        const servicesList = Array.from(mergedServices.values());
+        setServices(servicesList);
+        
+        // Build dynamic categories from services
+        const dynamicCats = buildDynamicCategories(servicesList);
+        setDynamicCategories(dynamicCats);
       } catch (error) {
         console.error('Error loading services:', error);
         setServices([]);
+        setDynamicCategories([]);
       } finally {
         setIsLoading(false);
       }
@@ -466,7 +451,7 @@ export const Services: React.FC = () => {
           Object.keys(data).forEach(key => {
             const svc = data[key];
             const serviceId = svc.id || key;
-            const catPath = svc.categoryPath || findCategoryPathByName(svc.category || '', CATEGORY_TREE);
+            const catPath = svc.categoryPath || [];
             mergedServices.set(serviceId, {
               id: serviceId,
               name: svc.name || '',
@@ -481,7 +466,12 @@ export const Services: React.FC = () => {
           });
         }
 
-        setServices(Array.from(mergedServices.values()));
+        const servicesList = Array.from(mergedServices.values());
+        setServices(servicesList);
+        
+        // Build dynamic categories from services
+        const dynamicCats = buildDynamicCategories(servicesList);
+        setDynamicCategories(dynamicCats);
       } catch (error) {
         console.error('Error in real-time listener:', error);
         setServices([]);
@@ -686,7 +676,7 @@ export const Services: React.FC = () => {
 
     // Khôi phục path cho edit modal
     // Khôi phục path cho edit modal
-    const path = service.categoryPath || findCategoryPathByName(service.category, CATEGORY_TREE);
+    const path = service.categoryPath || findCategoryPathByName(service.category, mergedCategories);
     if (path) {
       setCategoryPath(path);
       setCustomLevels({});
@@ -786,7 +776,7 @@ export const Services: React.FC = () => {
     <div className="flex h-[calc(100vh-8rem)] -mx-8 -mb-12">
       {/* Sidebar */}
       <CategorySidebar
-        categories={CATEGORY_TREE}
+        categories={mergedCategories}
         selectedCategory={selectedCategory}
         onSelectCategory={setSelectedCategory}
       />
