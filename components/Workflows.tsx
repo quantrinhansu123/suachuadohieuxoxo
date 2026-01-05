@@ -1217,6 +1217,165 @@ const CreateWorkflowModal: React.FC<{ onClose: () => void; onSuccess?: () => voi
    );
 };
 
+// Task Templates - Danh sách task mẫu
+const TASK_TEMPLATES: Array<{ title: string; description?: string; category: string }> = [
+   { title: 'Kiểm tra tình trạng ban đầu', description: 'Đánh giá tình trạng sản phẩm trước khi xử lý', category: 'Kiểm tra' },
+   { title: 'Chụp ảnh trước khi xử lý', description: 'Lưu lại hình ảnh ban đầu', category: 'Tài liệu' },
+   { title: 'Vệ sinh bề mặt', description: 'Làm sạch bề mặt sản phẩm', category: 'Vệ sinh' },
+   { title: 'Loại bỏ lớp mạ cũ', description: 'Gỡ bỏ lớp mạ/hoàn thiện cũ', category: 'Xử lý' },
+   { title: 'Mài nhẵn bề mặt', description: 'Mài phẳng và nhẵn bề mặt', category: 'Xử lý' },
+   { title: 'Phủ lớp mạ mới', description: 'Áp dụng lớp mạ/hoàn thiện mới', category: 'Hoàn thiện' },
+   { title: 'Kiểm tra chất lượng', description: 'Đánh giá chất lượng sau xử lý', category: 'Kiểm tra' },
+   { title: 'Chụp ảnh sau khi xử lý', description: 'Lưu lại hình ảnh hoàn thành', category: 'Tài liệu' },
+   { title: 'Đóng gói sản phẩm', description: 'Bao bì và chuẩn bị giao hàng', category: 'Hoàn thiện' },
+   { title: 'Ghi chú đặc biệt', description: 'Lưu ý quan trọng cần chú ý', category: 'Ghi chú' },
+];
+
+// --- Sub-component: Task Selection Modal ---
+const TaskSelectionModal: React.FC<{
+   isOpen: boolean;
+   onClose: () => void;
+   onSelectTask: (title: string, description?: string) => void;
+}> = ({ isOpen, onClose, onSelectTask }) => {
+   const [searchText, setSearchText] = useState('');
+   const [selectedCategory, setSelectedCategory] = useState<string>('Tất cả');
+   const [customTitle, setCustomTitle] = useState('');
+   const [customDescription, setCustomDescription] = useState('');
+
+   if (!isOpen) return null;
+
+   const categories = ['Tất cả', ...Array.from(new Set(TASK_TEMPLATES.map(t => t.category)))];
+   const filteredTemplates = TASK_TEMPLATES.filter(t => {
+      const matchesSearch = !searchText.trim() || 
+         t.title.toLowerCase().includes(searchText.toLowerCase()) ||
+         (t.description && t.description.toLowerCase().includes(searchText.toLowerCase()));
+      const matchesCategory = selectedCategory === 'Tất cả' || t.category === selectedCategory;
+      return matchesSearch && matchesCategory;
+   });
+
+   const handleSelectTemplate = (template: typeof TASK_TEMPLATES[0]) => {
+      onSelectTask(template.title, template.description);
+      onClose();
+   };
+
+   const handleAddCustom = () => {
+      if (!customTitle.trim()) return;
+      onSelectTask(customTitle.trim(), customDescription.trim() || undefined);
+      setCustomTitle('');
+      setCustomDescription('');
+      onClose();
+   };
+
+   return (
+      <div className="fixed inset-0 bg-black/60 backdrop-blur-sm flex items-center justify-center z-[200] p-4">
+         <div className="bg-neutral-900 rounded-xl shadow-2xl border border-neutral-800 w-full max-w-2xl max-h-[80vh] flex flex-col">
+            <div className="flex justify-between items-center p-6 border-b border-neutral-800">
+               <div>
+                  <h3 className="font-bold text-xl text-slate-100">Chọn Task</h3>
+                  <p className="text-sm text-slate-500 mt-1">Chọn từ mẫu có sẵn hoặc tạo task mới</p>
+               </div>
+               <button onClick={onClose} className="p-2 hover:bg-neutral-800 rounded-full transition-colors text-slate-400">
+                  <X size={20} />
+               </button>
+            </div>
+
+            <div className="flex-1 overflow-y-auto p-6 space-y-6">
+               {/* Search and Filter */}
+               <div className="space-y-3">
+                  <input
+                     type="text"
+                     value={searchText}
+                     onChange={(e) => setSearchText(e.target.value)}
+                     placeholder="Tìm kiếm task..."
+                     className="w-full px-4 py-2 border border-neutral-700 rounded-lg text-sm bg-neutral-800 text-slate-200 outline-none focus:border-gold-500"
+                  />
+                  <div className="flex flex-wrap gap-2">
+                     {categories.map(cat => (
+                        <button
+                           key={cat}
+                           onClick={() => setSelectedCategory(cat)}
+                           className={`px-3 py-1.5 rounded-lg text-xs font-medium transition-colors ${
+                              selectedCategory === cat
+                                 ? 'bg-gold-600 text-black'
+                                 : 'bg-neutral-800 text-slate-400 hover:bg-neutral-700'
+                           }`}
+                        >
+                           {cat}
+                        </button>
+                     ))}
+                  </div>
+               </div>
+
+               {/* Task Templates */}
+               <div>
+                  <h4 className="font-semibold text-slate-200 mb-3 text-sm">Task Mẫu</h4>
+                  <div className="grid grid-cols-1 gap-2 max-h-64 overflow-y-auto">
+                     {filteredTemplates.length === 0 ? (
+                        <div className="text-center py-8 text-slate-600 text-sm">
+                           Không tìm thấy task mẫu
+                        </div>
+                     ) : (
+                        filteredTemplates.map((template, idx) => (
+                           <button
+                              key={idx}
+                              onClick={() => handleSelectTemplate(template)}
+                              className="text-left p-3 bg-neutral-800/50 hover:bg-neutral-800 border border-neutral-700 rounded-lg transition-colors group"
+                           >
+                              <div className="flex items-start justify-between gap-2">
+                                 <div className="flex-1">
+                                    <div className="font-medium text-sm text-slate-200 group-hover:text-gold-400 transition-colors">
+                                       {template.title}
+                                    </div>
+                                    {template.description && (
+                                       <div className="text-xs text-slate-500 mt-1">{template.description}</div>
+                                    )}
+                                 </div>
+                                 <span className="text-xs px-2 py-1 bg-neutral-700 text-slate-400 rounded flex-shrink-0">
+                                    {template.category}
+                                 </span>
+                              </div>
+                           </button>
+                        ))
+                     )}
+                  </div>
+               </div>
+
+               {/* Custom Task */}
+               <div className="border-t border-neutral-800 pt-4">
+                  <h4 className="font-semibold text-slate-200 mb-3 text-sm">Tạo Task Tùy Chỉnh</h4>
+                  <div className="space-y-3">
+                     <input
+                        type="text"
+                        value={customTitle}
+                        onChange={(e) => setCustomTitle(e.target.value)}
+                        placeholder="Tên task..."
+                        className="w-full px-4 py-2 border border-neutral-700 rounded-lg text-sm bg-neutral-800 text-slate-200 outline-none focus:border-gold-500"
+                        onKeyPress={(e) => {
+                           if (e.key === 'Enter') handleAddCustom();
+                        }}
+                     />
+                     <textarea
+                        value={customDescription}
+                        onChange={(e) => setCustomDescription(e.target.value)}
+                        placeholder="Mô tả (tùy chọn)..."
+                        rows={2}
+                        className="w-full px-4 py-2 border border-neutral-700 rounded-lg text-sm bg-neutral-800 text-slate-200 outline-none focus:border-gold-500 resize-none"
+                     />
+                     <button
+                        onClick={handleAddCustom}
+                        disabled={!customTitle.trim()}
+                        className="w-full py-2.5 bg-gold-600 hover:bg-gold-700 disabled:bg-neutral-700 text-black rounded-lg text-sm font-medium transition-colors"
+                     >
+                        + Thêm Task Tùy Chỉnh
+                     </button>
+                  </div>
+               </div>
+            </div>
+         </div>
+      </div>
+   );
+};
+
 // --- Sub-component: Stage Item with Todo Steps ---
 const StageItemWithTodos: React.FC<{
    stage: WorkflowStage;
@@ -1228,8 +1387,10 @@ const StageItemWithTodos: React.FC<{
    onUpdate: (stage: WorkflowStage) => void;
 }> = ({ stage, idx, totalStages, onMoveUp, onMoveDown, onDelete, onUpdate }) => {
    const [isExpanded, setIsExpanded] = useState(false);
+   const [showTaskModal, setShowTaskModal] = useState(false);
    const [newTodoTitle, setNewTodoTitle] = useState('');
    const [newTodoNote, setNewTodoNote] = useState('');
+   const [selectedTodoId, setSelectedTodoId] = useState<string | null>(null);
 
    // Edit State
    const [editingTodo, setEditingTodo] = useState<{ id: string, title: string, description: string } | null>(null);
@@ -1241,12 +1402,13 @@ const StageItemWithTodos: React.FC<{
       setTodos(stage.todos || []);
    }, [stage.todos]);
 
-   const handleAddTodo = () => {
-      if (!newTodoTitle.trim()) return;
+   const handleAddTodo = (title?: string, description?: string) => {
+      const todoTitle = title || newTodoTitle.trim();
+      if (!todoTitle) return;
       const newTodo: TodoStep = {
          id: `todo-${Date.now()}`,
-         title: newTodoTitle,
-         description: newTodoNote.trim(),
+         title: todoTitle,
+         description: (description || newTodoNote.trim()) || undefined,
          completed: false,
          order: todos.length
       };
@@ -1255,6 +1417,10 @@ const StageItemWithTodos: React.FC<{
       onUpdate({ ...stage, todos: updatedTodos });
       setNewTodoTitle('');
       setNewTodoNote('');
+   };
+
+   const handleSelectTask = (title: string, description?: string) => {
+      handleAddTodo(title, description);
    };
 
    const startEditing = (todo: TodoStep) => {
@@ -1275,6 +1441,7 @@ const StageItemWithTodos: React.FC<{
       setTodos(updatedTodos);
       onUpdate({ ...stage, todos: updatedTodos });
       setEditingTodo(null);
+      setSelectedTodoId(null);
    };
 
    const handleToggleTodo = (todoId: string) => {
@@ -1294,17 +1461,60 @@ const StageItemWithTodos: React.FC<{
    const completedCount = todos.filter(t => t.completed).length;
 
    return (
-      <div className="bg-neutral-900 border border-neutral-800 rounded-lg shadow-sm overflow-hidden">
-         <div className="flex items-center justify-between p-3">
-            <div className="flex items-center gap-3 flex-1">
-               <button
-                  onClick={() => setIsExpanded(true)}
-                  className="text-xs px-2 py-1 bg-gold-600/20 hover:bg-gold-600/30 text-gold-400 rounded flex items-center gap-1 transition-colors"
-                  title="Thêm task cho bước này"
-               >
-                  <Plus size={12} />
-                  Task
-               </button>
+      <>
+         <TaskSelectionModal
+            isOpen={showTaskModal}
+            onClose={() => setShowTaskModal(false)}
+            onSelectTask={handleSelectTask}
+         />
+         <div className="bg-neutral-900 border border-neutral-800 rounded-lg shadow-sm overflow-hidden">
+            {/* Task Buttons - Prominent at top */}
+            <div className="px-3 pt-3 pb-2 border-b border-neutral-800">
+               <div className="flex gap-2">
+                  <button
+                     onClick={() => setShowTaskModal(true)}
+                     className="flex-1 py-2.5 bg-gradient-to-r from-gold-600 to-gold-700 hover:from-gold-700 hover:to-gold-800 text-black font-semibold rounded-lg flex items-center justify-center gap-2 transition-all shadow-lg shadow-gold-900/20 hover:shadow-gold-900/30"
+                     title="Thêm task cho bước này"
+                  >
+                     <Plus size={16} />
+                     <span>Thêm Task</span>
+                  </button>
+                  {selectedTodoId && (
+                     <>
+                        <button
+                           onClick={() => {
+                              const todo = todos.find(t => t.id === selectedTodoId);
+                              if (todo) {
+                                 startEditing(todo);
+                                 setSelectedTodoId(null);
+                              }
+                           }}
+                           className="px-4 py-2.5 bg-blue-600 hover:bg-blue-700 text-white font-semibold rounded-lg flex items-center justify-center gap-2 transition-all"
+                           title="Sửa task đã chọn"
+                        >
+                           <Edit size={16} />
+                           <span>Sửa</span>
+                        </button>
+                        <button
+                           onClick={() => {
+                              if (window.confirm('Xóa task này?')) {
+                                 handleRemoveTodo(selectedTodoId);
+                                 setSelectedTodoId(null);
+                              }
+                           }}
+                           className="px-4 py-2.5 bg-red-600 hover:bg-red-700 text-white font-semibold rounded-lg flex items-center justify-center gap-2 transition-all"
+                           title="Xóa task đã chọn"
+                        >
+                           <X size={16} />
+                           <span>Xóa</span>
+                        </button>
+                     </>
+                  )}
+               </div>
+            </div>
+            
+            <div className="flex items-center justify-between p-3">
+               <div className="flex items-center gap-3 flex-1">
                <button
                   onClick={() => setIsExpanded(!isExpanded)}
                   className="p-1 hover:bg-neutral-800 rounded transition-colors text-slate-500"
@@ -1355,184 +1565,134 @@ const StageItemWithTodos: React.FC<{
             </div>
          </div>
 
-         {/* Stage Details and Standards - Inline */}
-         <div className="border-t border-neutral-800 px-3 py-2 bg-neutral-900/30">
-            <div className="flex items-start gap-4 text-xs">
-               <div className="flex-shrink-0">
-                  <span className="font-medium text-slate-400">Tên:</span>
-                  <span className="ml-1 text-slate-300">{stage.name}</span>
+         {/* Todo List - Always visible, 2 columns */}
+         <div className="border-t border-neutral-800 p-4 bg-neutral-900/50 space-y-3">
+            {/* Add Todo Form */}
+            <div className="space-y-2">
+               <div className="flex gap-2">
+                  <input
+                     type="text"
+                     value={newTodoTitle}
+                     onChange={(e) => setNewTodoTitle(e.target.value)}
+                     onKeyPress={(e) => {
+                        if (e.key === 'Enter' && !e.shiftKey) {
+                           handleAddTodo();
+                        }
+                     }}
+                     placeholder="Thêm task..."
+                     className="flex-1 px-3 py-1.5 border border-neutral-700 rounded text-xs bg-neutral-800 text-slate-200 outline-none focus:border-gold-500"
+                  />
+                  <input
+                     type="text"
+                     value={newTodoNote}
+                     onChange={(e) => setNewTodoNote(e.target.value)}
+                     placeholder="Ghi chú..."
+                     className="flex-1 px-3 py-1.5 border border-neutral-700 rounded text-xs bg-neutral-800 text-slate-200 outline-none focus:border-gold-500"
+                  />
+                  <button
+                     onClick={handleAddTodo}
+                     disabled={!newTodoTitle.trim()}
+                     className="px-3 py-1.5 bg-gold-600 hover:bg-gold-700 disabled:bg-neutral-700 text-black rounded text-xs font-medium transition-colors"
+                  >
+                     +
+                  </button>
                </div>
-               {stage.details && (
-                  <div className="flex-1">
-                     <span className="font-medium text-slate-400">Nội dung:</span>
-                     <span className="ml-1 text-slate-300">{stage.details}</span>
+            </div>
+
+            {/* Todo List - 2 columns */}
+            <div className="grid grid-cols-2 gap-2">
+               {todos.length === 0 ? (
+                  <div className="col-span-2 text-center py-3 text-slate-600 text-xs border border-dashed border-neutral-700 rounded">
+                     Chưa có bước nhỏ nào. Thêm các chi tiết công việc ở đây.
                   </div>
-               )}
-               {stage.standards && (
-                  <div className="flex-1">
-                     <span className="font-medium text-slate-400">Tiêu chuẩn:</span>
-                     <span className="ml-1 text-slate-300">{stage.standards}</span>
-                  </div>
+               ) : (
+                  todos.sort((a, b) => a.order - b.order).map((todo, todoIdx) => (
+                     <div 
+                        key={todo.id} 
+                        onClick={() => setSelectedTodoId(todo.id)}
+                        className={`bg-neutral-800/50 rounded border transition-colors cursor-pointer ${
+                           selectedTodoId === todo.id 
+                              ? 'border-gold-500 bg-gold-900/20' 
+                              : 'border-neutral-700/50 hover:border-neutral-700'
+                        }`}
+                     >
+                        <div className="p-2">
+                           {/* Content or Edit Form */}
+                           {editingTodo && editingTodo.id === todo.id ? (
+                              <div className="space-y-2 animate-in fade-in zoom-in-95 duration-200">
+                                 {/* Edit Title */}
+                                 <div>
+                                    <input
+                                       value={editingTodo.title}
+                                       onChange={e => setEditingTodo({ ...editingTodo, title: e.target.value })}
+                                       className="w-full px-2 py-1.5 text-sm font-medium border border-neutral-600 rounded bg-neutral-900 text-slate-200 focus:border-gold-500 focus:ring-1 focus:ring-gold-500 outline-none placeholder-slate-500"
+                                       autoFocus
+                                       placeholder="Tên công việc..."
+                                       onKeyDown={e => {
+                                          if (e.key === 'Enter') {
+                                             const descInput = document.getElementById(`edit-desc-${todo.id}`);
+                                             if (descInput) descInput.focus();
+                                          }
+                                       }}
+                                    />
+                                 </div>
+                                 {/* Edit Description & Buttons */}
+                                 <div className="flex gap-2">
+                                    <input
+                                       id={`edit-desc-${todo.id}`}
+                                       value={editingTodo.description}
+                                       onChange={e => setEditingTodo({ ...editingTodo, description: e.target.value })}
+                                       className="flex-1 px-2 py-1.5 text-xs border border-neutral-700 rounded bg-neutral-900 text-slate-300 focus:border-gold-500 outline-none placeholder-slate-600"
+                                       placeholder="Ghi chú (tùy chọn)..."
+                                       onKeyDown={e => {
+                                          if (e.key === 'Enter') saveEditing();
+                                       }}
+                                    />
+                                    <div className="flex gap-1">
+                                       <button
+                                          onClick={(e) => { e.stopPropagation(); saveEditing(); }}
+                                          className="px-3 py-1.5 bg-gold-600 text-black text-xs font-bold rounded hover:bg-gold-700 transition-colors flex items-center gap-1"
+                                          title="Lưu thay đổi"
+                                       >
+                                          Lưu
+                                       </button>
+                                       <button
+                                          onClick={(e) => { e.stopPropagation(); setEditingTodo(null); setSelectedTodoId(null); }}
+                                          className="px-3 py-1.5 bg-neutral-700 text-slate-300 text-xs font-medium rounded hover:bg-neutral-600 transition-colors"
+                                          title="Hủy bỏ"
+                                       >
+                                          Hủy
+                                       </button>
+                                    </div>
+                                 </div>
+                              </div>
+                           ) : (
+                              <div className="flex items-start gap-2">
+                                 <div className="flex-shrink-0 mt-1 flex items-center gap-1.5">
+                                    <span className="text-xs font-medium text-slate-500 w-5">{todoIdx + 1}.</span>
+                                    <div className={`w-2 h-2 rounded-full ${todo.completed ? 'bg-emerald-500' : 'bg-slate-500'}`} />
+                                 </div>
+                                 <div className="flex-1 min-w-0">
+                                    <div 
+                                       className={`text-sm font-medium transition-colors ${todo.completed ? 'text-slate-500 line-through' : 'text-slate-300'}`}
+                                       title={todo.description || todo.title}
+                                    >
+                                       {todo.title}
+                                    </div>
+                                    {todo.description && (
+                                       <div className="text-xs text-slate-500 mt-0.5 line-clamp-2">{todo.description}</div>
+                                    )}
+                                 </div>
+                              </div>
+                           )}
+                        </div>
+                     </div>
+                  ))
                )}
             </div>
          </div>
-
-         {/* Show todos preview always */}
-         {todos.length > 0 && (
-            <div className="border-t border-neutral-800 px-3 py-2 bg-neutral-900/50">
-               <div className="space-y-1 max-h-24 overflow-y-auto">
-                  {todos.slice(0, 3).map((todo) => (
-                     <div key={todo.id} className="flex items-center gap-2 text-xs">
-                        <div className="w-1.5 h-1.5 rounded-full bg-slate-600 flex-shrink-0" />
-                        <span className="text-slate-300 truncate">
-                           {todo.title}
-                        </span>
-                     </div>
-                  ))}
-                  {todos.length > 3 && (
-                     <div className="text-xs text-slate-500 italic px-1">
-                        +{todos.length - 3} công việc khác...
-                     </div>
-                  )}
-               </div>
-            </div>
-         )}
-
-         {isExpanded && (
-            <div className="border-t border-neutral-800 p-4 bg-neutral-900/50 space-y-3">
-               {/* Add Todo Form */}
-               <div className="space-y-2">
-                  <div className="flex gap-2">
-                     <input
-                        type="text"
-                        value={newTodoTitle}
-                        onChange={(e) => setNewTodoTitle(e.target.value)}
-                        onKeyPress={(e) => {
-                           if (e.key === 'Enter' && !e.shiftKey) {
-                              handleAddTodo();
-                           }
-                        }}
-                        placeholder="Thêm task..."
-                        className="flex-1 px-3 py-1.5 border border-neutral-700 rounded text-xs bg-neutral-800 text-slate-200 outline-none focus:border-gold-500"
-                     />
-                     <input
-                        type="text"
-                        value={newTodoNote}
-                        onChange={(e) => setNewTodoNote(e.target.value)}
-                        placeholder="Ghi chú..."
-                        className="flex-1 px-3 py-1.5 border border-neutral-700 rounded text-xs bg-neutral-800 text-slate-200 outline-none focus:border-gold-500"
-                     />
-                     <button
-                        onClick={handleAddTodo}
-                        disabled={!newTodoTitle.trim()}
-                        className="px-3 py-1.5 bg-gold-600 hover:bg-gold-700 disabled:bg-neutral-700 text-black rounded text-xs font-medium transition-colors"
-                     >
-                        +
-                     </button>
-                  </div>
-               </div>
-
-               {/* Todo List */}
-               <div className="space-y-2">
-                  {todos.length === 0 ? (
-                     <div className="text-center py-3 text-slate-600 text-xs border border-dashed border-neutral-700 rounded">
-                        Chưa có bước nhỏ nào. Thêm các chi tiết công việc ở đây.
-                     </div>
-                  ) : (
-                     todos.map((todo) => (
-                        <div key={todo.id} className="bg-neutral-800/50 rounded border border-neutral-700/50 hover:border-neutral-700 transition-colors">
-                           <div className="flex items-center gap-2 p-2 relative">
-                              {/* BulletPoint */}
-                              <div className="flex-shrink-0 self-start mt-2">
-                                 <div className="w-1.5 h-1.5 rounded-full bg-slate-500" />
-                              </div>
-
-                              {/* Content or Edit Form */}
-                              {editingTodo && editingTodo.id === todo.id ? (
-                                 <div className="flex-1 space-y-2 animate-in fade-in zoom-in-95 duration-200">
-                                    {/* Edit Title */}
-                                    <div>
-                                       <input
-                                          value={editingTodo.title}
-                                          onChange={e => setEditingTodo({ ...editingTodo, title: e.target.value })}
-                                          className="w-full px-2 py-1.5 text-sm font-medium border border-neutral-600 rounded bg-neutral-900 text-slate-200 focus:border-gold-500 focus:ring-1 focus:ring-gold-500 outline-none placeholder-slate-500"
-                                          autoFocus
-                                          placeholder="Tên công việc..."
-                                          onKeyDown={e => {
-                                             if (e.key === 'Enter') {
-                                                // Focus next input or save
-                                                const descInput = document.getElementById(`edit-desc-${todo.id}`);
-                                                if (descInput) descInput.focus();
-                                             }
-                                          }}
-                                       />
-                                    </div>
-                                    {/* Edit Description & Buttons */}
-                                    <div className="flex gap-2">
-                                       <input
-                                          id={`edit-desc-${todo.id}`}
-                                          value={editingTodo.description}
-                                          onChange={e => setEditingTodo({ ...editingTodo, description: e.target.value })}
-                                          className="flex-1 px-2 py-1.5 text-xs border border-neutral-700 rounded bg-neutral-900 text-slate-300 focus:border-gold-500 outline-none placeholder-slate-600"
-                                          placeholder="Ghi chú (tùy chọn)..."
-                                          onKeyDown={e => {
-                                             if (e.key === 'Enter') saveEditing();
-                                          }}
-                                       />
-                                       <div className="flex gap-1">
-                                          <button
-                                             onClick={saveEditing}
-                                             className="px-3 py-1.5 bg-gold-600 text-black text-xs font-bold rounded hover:bg-gold-700 transition-colors flex items-center gap-1"
-                                             title="Lưu thay đổi"
-                                          >
-                                             Lưu
-                                          </button>
-                                          <button
-                                             onClick={() => setEditingTodo(null)}
-                                             className="px-3 py-1.5 bg-neutral-700 text-slate-300 text-xs font-medium rounded hover:bg-neutral-600 transition-colors"
-                                             title="Hủy bỏ"
-                                          >
-                                             Hủy
-                                          </button>
-                                       </div>
-                                    </div>
-                                 </div>
-                              ) : (
-                                 <div className="flex-1 group" onClick={() => startEditing(todo)} title="Nhấn để sửa">
-                                    <div className="flex justify-between items-start">
-                                       <span className={`text-sm font-medium transition-colors ${todo.completed ? 'text-slate-500 line-through' : 'text-slate-300 group-hover:text-gold-400 cursor-pointer'}`}>
-                                          {todo.title}
-                                       </span>
-                                       <div className="opacity-0 group-hover:opacity-100 transition-opacity flex gap-1">
-                                          <button
-                                             onClick={(e) => { e.stopPropagation(); startEditing(todo); }}
-                                             className="text-slate-600 hover:text-blue-400 p-1 transition-colors"
-                                             title="Sửa công việc"
-                                          >
-                                             <Edit size={14} />
-                                          </button>
-                                          <button
-                                             onClick={(e) => { e.stopPropagation(); handleRemoveTodo(todo.id); }}
-                                             className="text-slate-600 hover:text-red-500 p-1 transition-colors"
-                                             title="Xóa công việc"
-                                          >
-                                             <X size={14} />
-                                          </button>
-                                       </div>
-                                    </div>
-                                    {todo.description && (
-                                       <span className="text-xs text-slate-500 block mt-0.5 group-hover:text-slate-400">{todo.description}</span>
-                                    )}
-                                 </div>
-                              )}
-                           </div>
-                        </div>
-                     ))
-                  )}
-               </div>
-            </div>
-         )}
       </div>
+      </>
    );
 };
 
@@ -1681,6 +1841,112 @@ const WorkflowViewModal: React.FC<{ workflow: WorkflowDefinition, onClose: () =>
    );
 };
 
+// --- Sub-component: Add Task to Stage Modal ---
+const AddTaskToStageModal: React.FC<{
+   isOpen: boolean;
+   onClose: () => void;
+   stages: WorkflowStage[];
+   onAddTask: (stageId: string, taskTitle: string, taskDescription?: string) => void;
+}> = ({ isOpen, onClose, stages, onAddTask }) => {
+   const [selectedStageId, setSelectedStageId] = useState('');
+   const [taskTitle, setTaskTitle] = useState('');
+   const [taskDescription, setTaskDescription] = useState('');
+
+   if (!isOpen) return null;
+
+   const handleAdd = () => {
+      if (!selectedStageId || !taskTitle.trim()) return;
+      onAddTask(selectedStageId, taskTitle.trim(), taskDescription.trim() || undefined);
+      setSelectedStageId('');
+      setTaskTitle('');
+      setTaskDescription('');
+      onClose();
+   };
+
+   return (
+      <div className="fixed inset-0 bg-black/60 backdrop-blur-sm flex items-center justify-center z-[200] p-4">
+         <div className="bg-neutral-900 rounded-xl shadow-2xl border border-neutral-800 w-full max-w-lg flex flex-col">
+            <div className="flex justify-between items-center p-6 border-b border-neutral-800">
+               <div>
+                  <h3 className="font-bold text-xl text-slate-100">Thêm Task Con</h3>
+                  <p className="text-sm text-slate-500 mt-1">Chọn bước và thêm task con vào bước đó</p>
+               </div>
+               <button onClick={onClose} className="p-2 hover:bg-neutral-800 rounded-full transition-colors text-slate-400">
+                  <X size={20} />
+               </button>
+            </div>
+
+            <div className="p-6 space-y-4">
+               {/* Select Stage */}
+               <div>
+                  <label className="text-sm font-medium text-slate-300 mb-2 block">Chọn Bước Xử Lý</label>
+                  <select
+                     value={selectedStageId}
+                     onChange={(e) => setSelectedStageId(e.target.value)}
+                     className="w-full p-3 border border-neutral-700 rounded-lg text-sm bg-neutral-800 text-slate-200 outline-none focus:border-gold-500"
+                  >
+                     <option value="">-- Chọn bước --</option>
+                     {stages.sort((a, b) => a.order - b.order).map(stage => (
+                        <option key={stage.id} value={stage.id}>
+                           {stage.order + 1}. {stage.name}
+                        </option>
+                     ))}
+                  </select>
+                  {stages.length === 0 && (
+                     <p className="text-xs text-slate-500 mt-2">Chưa có bước nào. Vui lòng thêm bước trước.</p>
+                  )}
+               </div>
+
+               {/* Task Title */}
+               <div>
+                  <label className="text-sm font-medium text-slate-300 mb-2 block">Tên Task Con <span className="text-red-500">*</span></label>
+                  <input
+                     type="text"
+                     value={taskTitle}
+                     onChange={(e) => setTaskTitle(e.target.value)}
+                     placeholder="VD: Kiểm tra chất lượng, Chụp ảnh..."
+                     className="w-full p-3 border border-neutral-700 rounded-lg text-sm bg-neutral-800 text-slate-200 outline-none focus:border-gold-500"
+                     onKeyPress={(e) => {
+                        if (e.key === 'Enter' && selectedStageId && taskTitle.trim()) {
+                           handleAdd();
+                        }
+                     }}
+                  />
+               </div>
+
+               {/* Task Description */}
+               <div>
+                  <label className="text-sm font-medium text-slate-300 mb-2 block">Mô Tả (Tùy chọn)</label>
+                  <textarea
+                     value={taskDescription}
+                     onChange={(e) => setTaskDescription(e.target.value)}
+                     placeholder="Mô tả chi tiết task..."
+                     rows={3}
+                     className="w-full p-3 border border-neutral-700 rounded-lg text-sm bg-neutral-800 text-slate-200 outline-none focus:border-gold-500 resize-none"
+                  />
+               </div>
+            </div>
+
+            <div className="p-6 border-t border-neutral-800 flex justify-end gap-3">
+               <button
+                  onClick={onClose}
+                  className="px-4 py-2 border border-neutral-700 rounded-lg text-slate-400 hover:bg-neutral-800 text-sm font-medium transition-colors"
+               >
+                  Hủy
+               </button>
+               <button
+                  onClick={handleAdd}
+                  disabled={!selectedStageId || !taskTitle.trim()}
+                  className="px-4 py-2 bg-gold-600 hover:bg-gold-700 disabled:bg-neutral-700 text-black rounded-lg text-sm font-medium transition-colors"
+               >
+                  + Thêm Task
+               </button>
+            </div>
+         </div>
+      </div>
+   );
+};
+
 // --- Sub-component: Config Modal ---
 const WorkflowConfigModal: React.FC<{ workflow: WorkflowDefinition, onClose: () => void }> = ({ workflow, onClose }) => {
    const { inventory } = useAppStore();
@@ -1693,6 +1959,9 @@ const WorkflowConfigModal: React.FC<{ workflow: WorkflowDefinition, onClose: () 
    const [assignedMembers, setAssignedMembers] = useState<string[]>(workflow.assignedMembers || []);
    const [memberSearchText, setMemberSearchText] = useState('');
    const [workflowDepartment, setWorkflowDepartment] = useState<WorkflowDefinition['department']>(workflow.department);
+   const [showAddTaskModal, setShowAddTaskModal] = useState(false);
+   const stagesListRef = useRef<HTMLDivElement>(null);
+   const lastAddedStageRef = useRef<string | null>(null);
 
    // Helper to find inventory details
    const getInventoryItem = (id: string) => (inventory || []).find(i => i.id === id);
@@ -1716,17 +1985,54 @@ const WorkflowConfigModal: React.FC<{ workflow: WorkflowDefinition, onClose: () 
       setMaterials(newMaterials);
    };
 
+   const handleAddTaskToStage = (stageId: string, taskTitle: string, taskDescription?: string) => {
+      const stageIndex = stages.findIndex(s => s.id === stageId);
+      if (stageIndex === -1) {
+         console.error('Stage not found:', stageId);
+         return;
+      }
+
+      const stage = stages[stageIndex];
+      const newTodo: TodoStep = {
+         id: `todo-${Date.now()}`,
+         title: taskTitle,
+         description: taskDescription,
+         completed: false,
+         order: (stage.todos || []).length
+      };
+
+      const updatedTodos = [...(stage.todos || []), newTodo];
+      const updatedStage = { ...stage, todos: updatedTodos };
+      const updatedStages = stages.map((s, idx) => idx === stageIndex ? updatedStage : s);
+      setStages(updatedStages);
+      
+      // Scroll to the stage that was updated
+      setTimeout(() => {
+         const stageElement = document.getElementById(`stage-${stageId}`);
+         if (stageElement) {
+            stageElement.scrollIntoView({ behavior: 'smooth', block: 'nearest' });
+         }
+      }, 100);
+   };
+
    return (
-      <div className="fixed inset-0 bg-neutral-950 z-[100] flex flex-col">
-         <div className="p-6 border-b border-neutral-800 flex justify-between items-center bg-neutral-900">
-            <div>
-               <h3 className="font-bold text-2xl text-slate-100">Cấu Hình Quy Trình</h3>
-               <p className="text-sm text-slate-500 mt-1">{workflow.label}</p>
+      <>
+         <AddTaskToStageModal
+            isOpen={showAddTaskModal}
+            onClose={() => setShowAddTaskModal(false)}
+            stages={stages}
+            onAddTask={handleAddTaskToStage}
+         />
+         <div className="fixed inset-0 bg-neutral-950 z-[100] flex flex-col">
+            <div className="p-6 border-b border-neutral-800 flex justify-between items-center bg-neutral-900">
+               <div>
+                  <h3 className="font-bold text-2xl text-slate-100">Cấu Hình Quy Trình</h3>
+                  <p className="text-sm text-slate-500 mt-1">{workflow.label}</p>
+               </div>
+               <button onClick={onClose} className="p-2 hover:bg-neutral-800 rounded-full transition-colors text-slate-400">
+                  <X size={24} />
+               </button>
             </div>
-            <button onClick={onClose} className="p-2 hover:bg-neutral-800 rounded-full transition-colors text-slate-400">
-               <X size={24} />
-            </button>
-         </div>
 
          <div className="flex-1 overflow-y-auto p-8">
                <div className="max-w-[1600px] mx-auto">
@@ -2009,64 +2315,91 @@ const WorkflowConfigModal: React.FC<{ workflow: WorkflowDefinition, onClose: () 
                         </div>
                      </div>
 
-                     <button
-                        onClick={() => {
-                           if (!newStageName.trim()) return;
-                           const newStage: WorkflowStage = {
-                              id: newStageName.toLowerCase().replace(/\s+/g, '-'),
-                              name: newStageName,
-                              order: stages.length,
-                              color: newStageColor
-                           };
-                           setStages([...stages, newStage]);
-                           setNewStageName('');
-                           setNewStageColor('bg-slate-500');
-                        }}
-                        disabled={!newStageName.trim()}
-                        className="w-full py-2 bg-slate-100 hover:bg-white disabled:bg-neutral-800 text-black rounded text-sm font-medium transition-colors"
-                     >
-                        + Thêm Bước
-                     </button>
+                     <div className="grid grid-cols-2 gap-2">
+                        <button
+                           onClick={() => {
+                              if (!newStageName.trim()) return;
+                              const newStage: WorkflowStage = {
+                                 id: newStageName.toLowerCase().replace(/\s+/g, '-'),
+                                 name: newStageName,
+                                 order: stages.length,
+                                 color: newStageColor
+                              };
+                              const newStages = [...stages, newStage];
+                              setStages(newStages);
+                              setNewStageName('');
+                              setNewStageColor('bg-slate-500');
+                              
+                              // Lưu ID của stage vừa thêm để scroll đến
+                              lastAddedStageRef.current = newStage.id;
+                              
+                              // Scroll đến stage mới sau khi render
+                              setTimeout(() => {
+                                 const stageElement = document.getElementById(`stage-${newStage.id}`);
+                                 if (stageElement && stagesListRef.current) {
+                                    stageElement.scrollIntoView({ behavior: 'smooth', block: 'nearest' });
+                                    lastAddedStageRef.current = null;
+                                 }
+                              }, 100);
+                           }}
+                           disabled={!newStageName.trim()}
+                           className="py-2 bg-slate-100 hover:bg-white disabled:bg-neutral-800 text-black rounded text-sm font-medium transition-colors"
+                        >
+                           + Thêm Bước
+                        </button>
+                        <button
+                           onClick={() => setShowAddTaskModal(true)}
+                           disabled={stages.length === 0}
+                           className="py-2 bg-gold-600 hover:bg-gold-700 disabled:bg-neutral-800 disabled:text-slate-500 text-black rounded text-sm font-medium transition-colors flex items-center justify-center gap-1"
+                        >
+                           <Plus size={14} />
+                           Thêm Task
+                        </button>
+                     </div>
                   </div>
 
                   {/* Stages List */}
-                  <div className="space-y-3">
+                  <div ref={stagesListRef} className="space-y-3 max-h-[600px] overflow-y-auto">
                      {stages.length === 0 && (
                         <div className="text-center py-4 text-slate-600 text-sm border border-dashed border-neutral-800 rounded-lg">
                            Chưa có bước nào. Các bước này sẽ hiển thị ở Kanban Board.
                         </div>
                      )}
                      {stages.sort((a, b) => a.order - b.order).map((stage, idx) => (
-                        <StageItemWithTodos
-                           key={stage.id}
-                           stage={stage}
-                           idx={idx}
-                           totalStages={stages.length}
-                           onMoveUp={() => {
-                              const newStages = [...stages];
-                              [newStages[idx], newStages[idx - 1]] = [newStages[idx - 1], newStages[idx]];
-                              newStages[idx].order = idx;
-                              newStages[idx - 1].order = idx - 1;
-                              setStages(newStages);
-                           }}
-                           onMoveDown={() => {
-                              const newStages = [...stages];
-                              [newStages[idx], newStages[idx + 1]] = [newStages[idx + 1], newStages[idx]];
-                              newStages[idx].order = idx;
-                              newStages[idx + 1].order = idx + 1;
-                              setStages(newStages);
-                           }}
-                           onDelete={() => {
-                              if (window.confirm(`Xóa bước "${stage.name}"?`)) {
-                                 setStages(stages.filter(s => s.id !== stage.id).map((s, i) => ({ ...s, order: i })));
-                              }
-                           }}
-                           onUpdate={(updatedStage) => {
-                              const newStages = [...stages];
-                              newStages[idx] = updatedStage;
-                              setStages(newStages);
-                           }}
-                        />
+                        <div key={stage.id} id={`stage-${stage.id}`}>
+                           <StageItemWithTodos
+                              stage={stage}
+                              idx={idx}
+                              totalStages={stages.length}
+                              onMoveUp={() => {
+                                 const newStages = [...stages];
+                                 [newStages[idx], newStages[idx - 1]] = [newStages[idx - 1], newStages[idx]];
+                                 newStages[idx].order = idx;
+                                 newStages[idx - 1].order = idx - 1;
+                                 setStages(newStages);
+                              }}
+                              onMoveDown={() => {
+                                 const newStages = [...stages];
+                                 [newStages[idx], newStages[idx + 1]] = [newStages[idx + 1], newStages[idx]];
+                                 newStages[idx].order = idx;
+                                 newStages[idx + 1].order = idx + 1;
+                                 setStages(newStages);
+                              }}
+                              onDelete={() => {
+                                 if (window.confirm(`Xóa bước "${stage.name}"?`)) {
+                                    setStages(stages.filter(s => s.id !== stage.id).map((s, i) => ({ ...s, order: i })));
+                                 }
+                              }}
+                              onUpdate={(updatedStage) => {
+                                 const newStages = [...stages];
+                                 const stageIdx = newStages.findIndex(s => s.id === updatedStage.id);
+                                 if (stageIdx !== -1) {
+                                    newStages[stageIdx] = updatedStage;
+                                    setStages(newStages);
+                                 }
+                              }}
+                           />
+                        </div>
                      ))}
                   </div>
                   </div>
@@ -2130,5 +2463,6 @@ const WorkflowConfigModal: React.FC<{ workflow: WorkflowDefinition, onClose: () 
                </button>
             </div>
       </div>
+      </>
    );
 };
