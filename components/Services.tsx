@@ -133,34 +133,6 @@ const CategorySidebar: React.FC<{
 
     const paddingLeft = depth * 16 + 8;
 
-    // Helper để lấy tất cả children IDs (đệ quy)
-    const getAllChildrenIds = (cat: ServiceCategory): string[] => {
-      const ids = [cat.id];
-      if (cat.children) {
-        cat.children.forEach(child => {
-          ids.push(...getAllChildrenIds(child));
-        });
-      }
-      return ids;
-    };
-
-    const handleDelete = (e: React.MouseEvent) => {
-      e.stopPropagation();
-      const allIds = getAllChildrenIds(category);
-      if (window.confirm(`Xóa "${category.name}" và tất cả ${allIds.length - 1} cấp con?`)) {
-        if (onDeleteCategory) {
-          onDeleteCategory(category);
-        }
-      }
-    };
-
-    const handleEdit = (e: React.MouseEvent) => {
-      e.stopPropagation();
-      if (onEditCategory) {
-        onEditCategory(category);
-      }
-    };
-
     return (
       <div key={category.id}>
         <div
@@ -184,7 +156,7 @@ const CategorySidebar: React.FC<{
 
           {category.icon && <span className="text-sm">{category.icon}</span>}
 
-          <span className={`flex-1 ${category.level === 1 ? 'text-2xl font-bold' : category.level === 2 ? 'text-xl font-semibold' : category.level === 3 ? 'text-lg' : 'text-sm'} ${category.color || ''}`}>
+          <span className={`text-sm flex-1 ${category.level === 1 ? 'font-bold' : category.level === 2 ? 'font-semibold' : ''} ${category.color || ''}`}>
             {category.name}
           </span>
 
@@ -192,23 +164,37 @@ const CategorySidebar: React.FC<{
             <span className="text-xs text-slate-500 bg-neutral-800 px-1.5 py-0.5 rounded">L4</span>
           )}
 
-          {/* Edit and Delete buttons */}
-          <div className="flex items-center gap-1 opacity-0 group-hover:opacity-100 transition-opacity">
-            <button
-              onClick={handleEdit}
-              className="p-1 hover:bg-blue-600/20 text-blue-400 rounded transition-colors"
-              title="Sửa danh mục"
-            >
-              <Edit size={14} />
-            </button>
-            <button
-              onClick={handleDelete}
-              className="p-1 hover:bg-red-600/20 text-red-400 rounded transition-colors"
-              title="Xóa danh mục và tất cả cấp con"
-            >
-              <Trash2 size={14} />
-            </button>
-          </div>
+          {/* Edit and Delete buttons - show on hover */}
+          {(onEditCategory || onDeleteCategory) && (
+            <div className="opacity-0 group-hover:opacity-100 transition-opacity flex items-center gap-1">
+              {onEditCategory && (
+                <button
+                  onClick={(e) => {
+                    e.stopPropagation();
+                    onEditCategory(category);
+                  }}
+                  className="p-1 hover:bg-neutral-700 rounded text-slate-400 hover:text-blue-400 transition-colors"
+                  title="Sửa danh mục"
+                >
+                  <Edit size={14} />
+                </button>
+              )}
+              {onDeleteCategory && (
+                <button
+                  onClick={(e) => {
+                    e.stopPropagation();
+                    if (window.confirm(`Bạn có chắc chắn muốn xóa danh mục "${category.name}"?\n\nLưu ý: Tất cả các dịch vụ thuộc danh mục này sẽ bị ảnh hưởng.`)) {
+                      onDeleteCategory(category);
+                    }
+                  }}
+                  className="p-1 hover:bg-neutral-700 rounded text-slate-400 hover:text-red-400 transition-colors"
+                  title="Xóa danh mục"
+                >
+                  <Trash2 size={14} />
+                </button>
+              )}
+            </div>
+          )}
         </div>
 
         {hasChildren && isExpanded && (
@@ -223,7 +209,7 @@ const CategorySidebar: React.FC<{
   return (
     <div className="w-80 bg-neutral-900 border-r border-neutral-800 p-4 overflow-y-auto">
       <div className="mb-4">
-        <h3 className="font-bold text-5xl text-slate-100 mb-2">
+        <h3 className="font-bold text-slate-100 mb-2">
           Danh Mục Dịch Vụ
         </h3>
         <p className="text-xs text-slate-500">4 cấp phân loại</p>
@@ -371,7 +357,19 @@ export const Services: React.FC = () => {
     return null;
   };
 
-  // Helper tìm path từ ID category
+  // Helper tìm path từ ID category (trả về tên, không phải ID)
+  const findCategoryPathByIdToNames = (id: string, nodes: ServiceCategory[]): string[] | null => {
+    for (const node of nodes) {
+      if (node.id === id) return [node.name];
+      if (node.children) {
+        const childPath = findCategoryPathByIdToNames(id, node.children);
+        if (childPath) return [node.name, ...childPath];
+      }
+    }
+    return null;
+  };
+
+  // Helper tìm path từ ID category (trả về ID - giữ lại để tương thích)
   const findCategoryPathById = (id: string, nodes: ServiceCategory[]): string[] | null => {
     for (const node of nodes) {
       if (node.id === id) return [node.id];
@@ -794,105 +792,133 @@ export const Services: React.FC = () => {
     }
   };
 
-  // Helper để lấy tất cả category IDs trong cây (bao gồm children)
-  const getAllCategoryIds = (category: ServiceCategory): string[] => {
-    const ids = [category.id];
-    if (category.children) {
-      category.children.forEach(child => {
-        ids.push(...getAllCategoryIds(child));
-      });
-    }
-    return ids;
-  };
-
-  // Helper để tìm category path từ category name
-  const findCategoryPathByCategory = (category: ServiceCategory, allCategories: ServiceCategory[]): string[] => {
-    const findPath = (cat: ServiceCategory, nodes: ServiceCategory[], path: string[]): string[] | null => {
-      for (const node of nodes) {
-        if (node.id === cat.id || node.name === cat.name) {
-          return [...path, node.name];
-        }
-        if (node.children) {
-          const childPath = findPath(cat, node.children, [...path, node.name]);
-          if (childPath) return childPath;
+  // Helper để tìm category path bằng category object (trả về tên, không phải ID)
+  const findCategoryPathByCategory = (category: ServiceCategory, nodes: ServiceCategory[]): string[] | null => {
+    for (const node of nodes) {
+      // So sánh cả ID và name để tìm đúng category
+      if (node.id === category.id) {
+        return [node.name];
+      }
+      if (node.children && node.children.length > 0) {
+        const childPath = findCategoryPathByCategory(category, node.children);
+        if (childPath) {
+          return [node.name, ...childPath];
         }
       }
-      return null;
-    };
-    return findPath(category, allCategories, []) || [];
+    }
+    return null;
   };
 
-  const handleEditCategory = (category: ServiceCategory) => {
+  const handleEditCategory = async (category: ServiceCategory) => {
     const newName = window.prompt(`Sửa tên danh mục "${category.name}":`, category.name);
     if (!newName || newName.trim() === '' || newName === category.name) {
       return;
     }
 
-    // Tìm tất cả services có categoryPath chứa category này
+    // Tìm category path bằng tên (vì categoryPath lưu tên)
     const categoryPath = findCategoryPathByCategory(category, mergedCategories);
+    if (!categoryPath) {
+      alert('Không tìm thấy đường dẫn danh mục!');
+      return;
+    }
+
+    console.log('Edit category:', category.name, 'Path:', categoryPath);
+
+    // Tìm tất cả services có categoryPath bắt đầu với category path này (bao gồm cả các cấp con)
     const servicesToUpdate = services.filter(service => {
       if (!service.categoryPath || service.categoryPath.length === 0) return false;
-      // Kiểm tra xem categoryPath có chứa category này không
-      return service.categoryPath.some((pathItem, index) => 
-        pathItem === category.name && index === categoryPath.length - 1
-      );
+      
+      const level = categoryPath.length - 1;
+      // Phải có ít nhất level + 1 phần tử trong categoryPath
+      if (service.categoryPath.length <= level) return false;
+      
+      // Kiểm tra xem các phần tử từ đầu đến level có khớp không
+      for (let i = 0; i <= level; i++) {
+        if (service.categoryPath[i] !== categoryPath[i]) {
+          return false;
+        }
+      }
+      return true;
     });
 
-    // Cập nhật tất cả services có categoryPath chứa category này
-    const updatePromises = servicesToUpdate.map(async (service) => {
-      const updatedPath = service.categoryPath!.map((pathItem, index) => 
-        pathItem === category.name && index === categoryPath.length - 1 ? newName : pathItem
-      );
-      const updatedService = {
-        ...service,
-        categoryPath: updatedPath,
-        category: updatedPath[updatedPath.length - 1] || service.category
-      };
-      await set(ref(db, `${DB_PATHS.SERVICES}/${service.id}`), updatedService);
-    });
+    console.log('Services to update:', servicesToUpdate.length, servicesToUpdate.map(s => ({ name: s.name, path: s.categoryPath })));
 
-    Promise.all(updatePromises).then(() => {
-      alert(`Đã sửa danh mục "${category.name}" thành "${newName}" cho ${servicesToUpdate.length} dịch vụ!`);
-    }).catch(error => {
-      console.error('Lỗi khi sửa danh mục:', error);
-      alert('Có lỗi xảy ra khi sửa danh mục!');
-    });
+    if (servicesToUpdate.length === 0) {
+      alert(`Không có dịch vụ nào thuộc danh mục "${category.name}"!\n\nĐường dẫn tìm được: ${categoryPath.join(' > ')}`);
+      return;
+    }
+
+    // Cập nhật categoryPath cho tất cả services (bao gồm cả các cấp con)
+    try {
+      let updatedCount = 0;
+      await Promise.all(
+        servicesToUpdate.map(async (service) => {
+          const updatedPath = [...service.categoryPath!];
+          const level = categoryPath.length - 1;
+          // Cập nhật tên ở level này
+          if (updatedPath[level] === category.name) {
+            updatedPath[level] = newName.trim();
+            const updatedService = {
+              ...service,
+              categoryPath: updatedPath,
+              category: updatedPath.join(' > ')
+            };
+            await set(ref(db, `${DB_PATHS.SERVICES}/${service.id}`), updatedService);
+            updatedCount++;
+          }
+        })
+      );
+      alert(`Đã cập nhật ${updatedCount}/${servicesToUpdate.length} dịch vụ (bao gồm cả các cấp con) với tên danh mục mới: "${newName}"`);
+    } catch (error: any) {
+      console.error('Lỗi khi cập nhật danh mục:', error);
+      alert('Lỗi khi cập nhật danh mục: ' + (error?.message || String(error)));
+    }
   };
 
   const handleDeleteCategory = async (category: ServiceCategory) => {
-    // Lấy tất cả category IDs (bao gồm children)
-    const allCategoryIds = getAllCategoryIds(category);
+    // Tìm category path bằng tên (vì categoryPath lưu tên)
     const categoryPath = findCategoryPathByCategory(category, mergedCategories);
+    if (!categoryPath) {
+      alert('Không tìm thấy đường dẫn danh mục!');
+      return;
+    }
 
-    // Tìm tất cả services có categoryPath chứa category này hoặc bất kỳ children nào
-    const servicesToDelete = services.filter(service => {
+    // Tìm tất cả services có categoryPath chứa category này
+    const servicesToUpdate = services.filter(service => {
       if (!service.categoryPath || service.categoryPath.length === 0) return false;
-      // Kiểm tra xem categoryPath có bắt đầu với categoryPath của category này không
-      return service.categoryPath.length >= categoryPath.length &&
-        service.categoryPath.slice(0, categoryPath.length).every((item, index) => item === categoryPath[index]);
+      // Kiểm tra xem categoryPath có chứa category này không (so sánh theo tên)
+      const level = categoryPath.length - 1;
+      return service.categoryPath.length > level && service.categoryPath[level] === category.name;
     });
 
-    if (servicesToDelete.length === 0) {
-      alert(`Không có dịch vụ nào thuộc danh mục "${category.name}"!`);
-      return;
-    }
+    if (servicesToUpdate.length > 0) {
+      const confirmMessage = `Bạn có chắc chắn muốn xóa danh mục "${category.name}"?\n\nCó ${servicesToUpdate.length} dịch vụ sẽ bị ảnh hưởng.\n\nSau khi xóa, các dịch vụ này sẽ không còn thuộc danh mục này.`;
+      if (!window.confirm(confirmMessage)) {
+        return;
+      }
 
-    if (!window.confirm(`Xóa danh mục "${category.name}" và tất cả ${servicesToDelete.length} dịch vụ thuộc danh mục này?`)) {
-      return;
-    }
-
-    try {
-      // Xóa tất cả services thuộc category này
-      const deletePromises = servicesToDelete.map(async (service) => {
-        await remove(ref(db, `${DB_PATHS.SERVICES}/${service.id}`));
-      });
-
-      await Promise.all(deletePromises);
-      alert(`Đã xóa danh mục "${category.name}" và ${servicesToDelete.length} dịch vụ!`);
-      // Services will be updated automatically via Firebase listener
-    } catch (error: any) {
-      console.error('Lỗi khi xóa danh mục:', error);
-      alert('Có lỗi xảy ra khi xóa danh mục!');
+      // Xóa categoryPath cho tất cả services (hoặc cập nhật để loại bỏ category này)
+      try {
+        await Promise.all(
+          servicesToUpdate.map(async (service) => {
+            // Xóa phần categoryPath từ vị trí category này trở đi
+            const level = categoryPath.length - 1;
+            const updatedPath = service.categoryPath!.slice(0, level);
+            const updatedService = {
+              ...service,
+              categoryPath: updatedPath.length > 0 ? updatedPath : [],
+              category: updatedPath.length > 0 ? updatedPath.join(' > ') : 'Chưa phân loại'
+            };
+            await set(ref(db, `${DB_PATHS.SERVICES}/${service.id}`), updatedService);
+          })
+        );
+        alert(`Đã xóa danh mục "${category.name}" và cập nhật ${servicesToUpdate.length} dịch vụ!`);
+      } catch (error: any) {
+        console.error('Lỗi khi xóa danh mục:', error);
+        alert('Lỗi khi xóa danh mục: ' + (error?.message || String(error)));
+      }
+    } else {
+      alert('Không có dịch vụ nào thuộc danh mục này!');
     }
   };
 
@@ -928,7 +954,26 @@ export const Services: React.FC = () => {
       <CategorySidebar
         categories={mergedCategories}
         selectedCategory={selectedCategory}
-        onSelectCategory={setSelectedCategory}
+        onSelectCategory={(categoryId) => {
+          setSelectedCategory(categoryId);
+          // Tự động điền categoryPath vào form khi chọn category từ sidebar
+          if (categoryId) {
+            // Tìm path bằng ID (trả về ID để phù hợp với form)
+            const path = findCategoryPathById(categoryId, mergedCategories);
+            if (path) {
+              setCategoryPath(path);
+              // Tìm path bằng tên để hiển thị
+              const namePath = findCategoryPathByIdToNames(categoryId, mergedCategories);
+              if (namePath) {
+                setNewService(prev => ({ ...prev, category: namePath.join(' > ') }));
+              }
+            }
+          } else {
+            // Nếu chọn "Tất cả", reset categoryPath
+            setCategoryPath([]);
+            setNewService(prev => ({ ...prev, category: '' }));
+          }
+        }}
         onEditCategory={handleEditCategory}
         onDeleteCategory={handleDeleteCategory}
       />
