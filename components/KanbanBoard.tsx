@@ -142,10 +142,12 @@ export const KanbanBoard: React.FC = () => {
         const { data: workflowsData, error: workflowsError } = await supabase
           .from(DB_PATHS.WORKFLOWS)
           .select('id, ten_quy_trinh, mo_ta, phong_ban_phu_trach, loai_ap_dung, vat_tu_can_thiet, nhan_vien_duoc_giao')
-          .order('ngay_tao', { ascending: false })
           .limit(100);
 
-        if (workflowsError) throw workflowsError;
+        if (workflowsError) {
+          console.error('Error loading workflows:', workflowsError);
+          throw workflowsError;
+        }
 
         // Load stages từ database
         const { data: stagesData, error: stagesError } = await supabase

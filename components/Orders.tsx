@@ -807,7 +807,7 @@ export const Orders: React.FC = () => {
 
     return () => {
       supabase.removeChannel(servicesChannel);
-      supabase.removeChannel(workflowsChannel);
+      // workflowsChannel đã bị comment, không cần remove
     };
   }, []);
 
