@@ -116,13 +116,13 @@ export interface InventoryItem {
 export interface Member {
   id: string;
   name: string;
-  role: 'Quản lý' | 'Tư vấn viên' | 'Kỹ thuật viên' | 'QC';
+  role: string; // Cho phép bất kỳ vai trò nào
   phone: string;
   email: string;
   status: 'Active' | 'Off';
   avatar?: string;
   specialty?: string;
-  department?: 'Kỹ Thuật' | 'Spa' | 'QA/QC' | 'Hậu Cần' | 'Quản Lý' | 'Kinh Doanh';
+  department?: string; // Cho phép bất kỳ phòng ban nào
 }
 
 export interface WorkflowMaterial {
@@ -146,6 +146,7 @@ export interface WorkflowStage {
   details?: string; // Chi tiết
   standards?: string; // Tiêu chuẩn
   todos?: TodoStep[]; // Danh sách các bước nhỏ trong một bước lớn
+  assignedMembers?: string[]; // Danh sách ID nhân sự phụ trách bước này
 }
 
 export interface WorkflowDefinition {

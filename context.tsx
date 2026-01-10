@@ -1,8 +1,8 @@
 import React, { createContext, useContext, useState, useEffect, ReactNode } from 'react';
-import { ref, onValue, set, update, push, get, remove } from 'firebase/database';
-import { db, DB_PATHS } from './firebase';
+import { supabase, DB_TABLES } from './supabase';
 import {
   Order,
+  OrderStatus,
   InventoryItem,
   ServiceItem,
   WorkflowDefinition,
@@ -53,6 +53,91 @@ export const AppProvider: React.FC<{ children: ReactNode }> = ({ children }) => 
   const [workflows, setWorkflows] = useState<WorkflowDefinition[]>([]);
   const [isLoading, setIsLoading] = useState(true);
 
+  // Mapping functions for order status (must be defined before use)
+  const mapOrderStatusDisplayToDb = (displayValue: OrderStatus | string): string => {
+    const mapping: Record<string, string> = {
+      'Pending': 'cho_xu_ly',
+      'Confirmed': 'da_xac_nhan',
+      'Processing': 'dang_xu_ly',
+      'Done': 'hoan_thanh',
+      'Delivered': 'da_giao',
+      'Cancelled': 'huy'
+    };
+    return mapping[displayValue] || 'cho_xu_ly';
+  };
+
+  const mapOrderStatusDbToDisplay = (dbValue: string | null | undefined): OrderStatus => {
+    if (!dbValue) return OrderStatus.PENDING;
+    const mapping: Record<string, OrderStatus> = {
+      'cho_xu_ly': OrderStatus.PENDING,
+      'da_xac_nhan': OrderStatus.CONFIRMED,
+      'dang_xu_ly': OrderStatus.PROCESSING,
+      'hoan_thanh': OrderStatus.DONE,
+      'da_giao': OrderStatus.DELIVERED,
+      'huy': OrderStatus.CANCELLED
+    };
+    return mapping[dbValue] || OrderStatus.PENDING;
+  };
+
+  // Mapping function for service type (loai)
+  const mapServiceTypeToDb = (serviceType: ServiceType | string): string => {
+    const mapping: Record<string, string> = {
+      'Repair': 'sua_chua',
+      'Cleaning': 've_sinh',
+      'Plating': 'xi_ma',
+      'Dyeing': 'nhuom',
+      'Custom': 'custom',
+      'Product': 'san_pham'
+    };
+    return mapping[serviceType] || 'custom';
+  };
+
+  const mapServiceTypeFromDb = (dbValue: string | null | undefined): ServiceType => {
+    if (!dbValue) return ServiceType.CUSTOM;
+    const mapping: Record<string, ServiceType> = {
+      'sua_chua': ServiceType.REPAIR,
+      've_sinh': ServiceType.CLEANING,
+      'xi_ma': ServiceType.PLATING,
+      'nhuom': ServiceType.DYEING,
+      'custom': ServiceType.CUSTOM,
+      'san_pham': ServiceType.PRODUCT
+    };
+    return mapping[dbValue] || ServiceType.CUSTOM;
+  };
+
+  // Helper function to convert date string to ISO format for PostgreSQL
+  const formatDateForDB = (dateString: string | null | undefined): string | null => {
+    if (!dateString) return null;
+    
+    // If already in ISO format (YYYY-MM-DD or YYYY-MM-DDTHH:mm:ss), return as is
+    if (/^\d{4}-\d{2}-\d{2}/.test(dateString)) {
+      return dateString;
+    }
+    
+    // Try to parse various date formats
+    try {
+      // Handle DD/MM/YYYY or D/M/YYYY format
+      const parts = dateString.split('/');
+      if (parts.length === 3) {
+        const day = parts[0].padStart(2, '0');
+        const month = parts[1].padStart(2, '0');
+        const year = parts[2];
+        // Return ISO format: YYYY-MM-DD
+        return `${year}-${month}-${day}`;
+      }
+      
+      // Try to parse with Date object and convert to ISO
+      const date = new Date(dateString);
+      if (!isNaN(date.getTime())) {
+        return date.toISOString().split('T')[0]; // Return YYYY-MM-DD
+      }
+    } catch (error) {
+      console.warn('Error parsing date:', dateString, error);
+    }
+    
+    return null;
+  };
+
   // Helper function để chuyển đổi từ tiếng Việt sang tiếng Anh
   const mapVietnameseOrderToEnglish = (vnOrder: any): Order => {
     return {
@@ -61,24 +146,24 @@ export const AppProvider: React.FC<{ children: ReactNode }> = ({ children }) => 
       customerName: vnOrder.ten_khach_hang || vnOrder.customerName,
       items: (vnOrder.danh_sach_dich_vu || vnOrder.items || []).map((item: any) => ({
         id: item.ma_item || item.id,
-        name: item.ten || item.name,
-        type: item.loai_dich_vu || item.type,
-        price: item.gia || item.price,
+        name: item.ten_hang_muc || item.ten || item.name,
+        type: mapServiceTypeFromDb(item.loai || item.loai_dich_vu || item.type),
+        price: Number(item.don_gia || item.gia || item.price || 0),
         quantity: item.so_luong || item.quantity || 1,
         status: item.trang_thai || item.status,
-        technicianId: item.technicianId,
+        technicianId: item.id_ky_thuat_vien || item.technicianId,
         beforeImage: item.anh_truoc || item.beforeImage,
         afterImage: item.anh_sau || item.afterImage,
-        isProduct: item.isProduct,
-        serviceId: item.serviceId,
-        workflowId: item.workflowId,
-        history: item.history,
-        lastUpdated: item.lastUpdated,
-        technicalLog: item.technicalLog
+        isProduct: item.la_san_pham || item.isProduct || false,
+        serviceId: item.id_dich_vu_goc || item.serviceId,
+        workflowId: item.id_quy_trinh || item.workflowId,
+        history: item.lich_su_thuc_hien || item.history,
+        lastUpdated: item.cap_nhat_cuoi || item.lastUpdated,
+        technicalLog: item.nhat_ky_ky_thuat || item.technicalLog
       })),
       totalAmount: vnOrder.tong_tien || vnOrder.totalAmount,
       deposit: vnOrder.dat_coc || vnOrder.deposit,
-      status: vnOrder.trang_thai || vnOrder.status,
+      status: mapOrderStatusDbToDisplay(vnOrder.trang_thai || vnOrder.status),
       createdAt: vnOrder.ngay_tao || vnOrder.createdAt,
       expectedDelivery: vnOrder.ngay_giao_du_kien || vnOrder.expectedDelivery,
       notes: vnOrder.ghi_chu || vnOrder.notes
@@ -101,17 +186,119 @@ export const AppProvider: React.FC<{ children: ReactNode }> = ({ children }) => 
     };
   };
 
+  // Mapping functions for database values to frontend display values
+  const mapDepartmentDbToDisplay = (dbValue: string | null | undefined): Member['department'] | undefined => {
+    if (!dbValue) return undefined;
+    const mapping: Record<string, Member['department']> = {
+      'ky_thuat': 'Kỹ Thuật',
+      'spa': 'Spa',
+      'qc': 'QA/QC',
+      'hau_can': 'Hậu Cần',
+      'quan_ly': 'Quản Lý',
+      'kinh_doanh': 'Kinh Doanh'
+    };
+    // Nếu có trong mapping thì dùng giá trị đó
+    if (mapping[dbValue]) {
+      return mapping[dbValue];
+    }
+    // Nếu không có trong mapping, chuyển đổi từ snake_case sang Title Case
+    return dbValue
+      .split('_')
+      .map(word => word.charAt(0).toUpperCase() + word.slice(1))
+      .join(' ') as Member['department'];
+  };
+
+  const mapDepartmentDisplayToDb = (displayValue: string | null | undefined): string | null => {
+    if (!displayValue || displayValue.trim() === '') return null;
+    const mapping: Record<string, string> = {
+      'Kỹ Thuật': 'ky_thuat',
+      'Spa': 'spa',
+      'QA/QC': 'qc',
+      'Hậu Cần': 'hau_can',
+      'Quản Lý': 'quan_ly',
+      'Kinh Doanh': 'kinh_doanh'
+    };
+    // Nếu có trong mapping thì dùng giá trị đó, nếu không thì chuyển đổi thành snake_case
+    if (mapping[displayValue]) {
+      return mapping[displayValue];
+    }
+    // Chuyển đổi giá trị mới thành snake_case để lưu vào database
+    const snakeCase = displayValue
+      .toLowerCase()
+      .normalize('NFD')
+      .replace(/[\u0300-\u036f]/g, '') // Bỏ dấu
+      .replace(/[^a-z0-9]+/g, '_') // Thay ký tự đặc biệt bằng underscore
+      .replace(/^_+|_+$/g, ''); // Bỏ underscore ở đầu và cuối
+    return snakeCase || null;
+  };
+
+  const mapRoleDbToDisplay = (dbValue: string | null | undefined): Member['role'] => {
+    if (!dbValue) return 'Tư vấn viên';
+    const mapping: Record<string, Member['role']> = {
+      'quan_ly': 'Quản lý',
+      'tu_van': 'Tư vấn viên',
+      'ky_thuat': 'Kỹ thuật viên',
+      'qc': 'QC'
+    };
+    // Nếu có trong mapping thì dùng giá trị đó
+    if (mapping[dbValue]) {
+      return mapping[dbValue];
+    }
+    // Nếu không có trong mapping, chuyển đổi từ snake_case sang Title Case
+    return dbValue
+      .split('_')
+      .map(word => word.charAt(0).toUpperCase() + word.slice(1))
+      .join(' ') as Member['role'];
+  };
+
+  const mapRoleDisplayToDb = (displayValue: string): string => {
+    const mapping: Record<string, string> = {
+      'Quản lý': 'quan_ly',
+      'Tư vấn viên': 'tu_van',
+      'Kỹ thuật viên': 'ky_thuat',
+      'QC': 'qc'
+    };
+    // Nếu có trong mapping thì dùng giá trị đó
+    if (mapping[displayValue]) {
+      return mapping[displayValue];
+    }
+    // Nếu không có trong mapping, chuyển đổi thành snake_case để lưu vào database
+    return displayValue
+      .toLowerCase()
+      .normalize('NFD')
+      .replace(/[\u0300-\u036f]/g, '') // Bỏ dấu
+      .replace(/[^a-z0-9]+/g, '_') // Thay ký tự đặc biệt bằng underscore
+      .replace(/^_+|_+$/g, ''); // Bỏ underscore ở đầu và cuối
+  };
+
+  const mapStatusDbToDisplay = (dbValue: string | null | undefined): Member['status'] => {
+    if (!dbValue) return 'Active';
+    const mapping: Record<string, Member['status']> = {
+      'hoat_dong': 'Active',
+      'nghi': 'Off'
+    };
+    return mapping[dbValue] || 'Active';
+  };
+
+  const mapStatusDisplayToDb = (displayValue: string): string => {
+    const mapping: Record<string, string> = {
+      'Active': 'hoat_dong',
+      'Off': 'nghi'
+    };
+    return mapping[displayValue] || 'hoat_dong';
+  };
+
   const mapVietnameseMemberToEnglish = (vnItem: any): Member => {
     return {
       id: vnItem.ma_nhan_vien || vnItem.id,
       name: vnItem.ho_ten || vnItem.name,
-      role: vnItem.chuc_vu || vnItem.role,
-      phone: vnItem.so_dien_thoai || vnItem.phone,
+      role: mapRoleDbToDisplay(vnItem.vai_tro),
+      phone: vnItem.sdt || vnItem.so_dien_thoai || vnItem.phone,
       email: vnItem.email || '',
-      status: vnItem.trang_thai || vnItem.status,
+      status: mapStatusDbToDisplay(vnItem.trang_thai),
       avatar: vnItem.anh_dai_dien || vnItem.avatar,
       specialty: vnItem.chuyen_mon || vnItem.specialty,
-      department: vnItem.phong_ban || vnItem.department
+      department: mapDepartmentDbToDisplay(vnItem.phong_ban)
     };
   };
 
@@ -127,173 +314,526 @@ export const AppProvider: React.FC<{ children: ReactNode }> = ({ children }) => 
     };
   };
 
+  // Mapping functions for customer tier
+  const mapTierDbToDisplay = (dbValue: string | null | undefined): Customer['tier'] => {
+    if (!dbValue) return 'Standard';
+    const mapping: Record<string, Customer['tier']> = {
+      'thuong': 'Standard',
+      'vip': 'VIP',
+      'vvip': 'VVIP'
+    };
+    return mapping[dbValue.toLowerCase()] || 'Standard';
+  };
+
+  const mapTierDisplayToDb = (displayValue: Customer['tier'] | string | null | undefined): string => {
+    if (!displayValue) return 'thuong';
+    const mapping: Record<string, string> = {
+      'Standard': 'thuong',
+      'VIP': 'vip',
+      'VVIP': 'vvip'
+    };
+    return mapping[displayValue] || 'thuong';
+  };
+
   const mapVietnameseCustomerToEnglish = (vnItem: any): Customer => {
     return {
       id: vnItem.ma_khach_hang || vnItem.id,
-      name: vnItem.ho_ten || vnItem.name,
-      phone: vnItem.so_dien_thoai || vnItem.phone,
+      name: vnItem.ten || vnItem.ho_ten || vnItem.name,
+      phone: vnItem.sdt || vnItem.so_dien_thoai || vnItem.phone,
       email: vnItem.email || '',
       address: vnItem.dia_chi || vnItem.address,
-      tier: vnItem.hang_khach || vnItem.tier || 'Standard',
+      tier: mapTierDbToDisplay(vnItem.hang_thanh_vien || vnItem.hang_khach || vnItem.tier),
       totalSpent: vnItem.tong_chi_tieu || vnItem.totalSpent || 0,
-      lastVisit: vnItem.lan_ghe_gan_nhat || vnItem.lastVisit || '',
-      notes: vnItem.ghi_chu || vnItem.notes
+      lastVisit: vnItem.lan_cuoi_ghe || vnItem.lan_ghe_gan_nhat || vnItem.lastVisit || '',
+      notes: vnItem.ghi_chu || vnItem.notes,
+      source: vnItem.nguon_khach || vnItem.source,
+      status: vnItem.trang_thai || vnItem.status,
+      assigneeId: vnItem.id_nhan_vien_phu_trach || vnItem.assigneeId,
+      interactionCount: vnItem.so_lan_tuong_tac || vnItem.interactionCount || 0,
+      group: vnItem.nhom_khach || vnItem.group
     };
   };
 
-  // --- 1. Lắng nghe dữ liệu thực từ Firebase (Realtime) ---
-  useEffect(() => {
-    setIsLoading(true);
+  // --- 1. Load dữ liệu từ Supabase (Realtime) ---
+  const loadOrders = async () => {
+    try {
+      // Load orders và items song song (tối ưu: giảm limit và chỉ select cần thiết)
+      const [ordersResult, itemsResult] = await Promise.all([
+        supabase
+          .from(DB_TABLES.ORDERS)
+          .select('id, id_khach_hang, ten_khach_hang, tong_tien, tien_coc, trang_thai, ngay_du_kien_giao, ghi_chu, ngay_tao')
+          .order('ngay_tao', { ascending: false })
+          .limit(20), // Giảm xuống 20 để tăng tốc độ
+        supabase
+          .from(DB_TABLES.SERVICE_ITEMS)
+          .select('id, id_don_hang, ten_hang_muc, loai, don_gia, so_luong, trang_thai, id_ky_thuat_vien, la_san_pham, id_dich_vu_goc, id_quy_trinh, anh_truoc, anh_sau, lich_su_thuc_hien, nhat_ky_ky_thuat, cap_nhat_cuoi')
+          .limit(100) // Giảm xuống 100 để tăng tốc độ
+      ]);
 
-    // Lắng nghe Đơn hàng (don_hang)
-    const ordersRef = ref(db, DB_PATHS.ORDERS);
-    const unsubOrders = onValue(ordersRef, (snapshot) => {
-      const data = snapshot.val();
-      if (data) {
-        // Convert Object to Array & Map Vietnamese to English & Sort by Date desc
-        const list: Order[] = Object.values(data).map(mapVietnameseOrderToEnglish);
-        setOrders(list.sort((a, b) => {
-          const dateA = new Date(a.createdAt);
-          const dateB = new Date(b.createdAt);
-          return dateB.getTime() - dateA.getTime();
-        }));
-      } else {
-        setOrders([]);
+      if (ordersResult.error) {
+        console.error('Error loading orders:', ordersResult.error);
+        throw ordersResult.error;
       }
-    });
-
-    // Lắng nghe Kho (kho_vat_tu)
-    const inventoryRef = ref(db, DB_PATHS.INVENTORY);
-    const unsubInventory = onValue(inventoryRef, (snapshot) => {
-      const data = snapshot.val();
-      if (data) {
-        const list: InventoryItem[] = Object.values(data).map(mapVietnameseInventoryToEnglish);
-        setInventory(list);
-      } else {
-        setInventory([]);
+      
+      if (itemsResult.error) {
+        console.error('Error loading service items:', itemsResult.error);
+        // Vẫn tiếp tục với orders, chỉ không có items
       }
-    });
 
-    // Lắng nghe Nhân sự
-    const membersRef = ref(db, DB_PATHS.MEMBERS);
-    const unsubMembers = onValue(membersRef, (snapshot) => {
-      const data = snapshot.val();
-      if (data) {
-        setMembers(Object.values(data).map(mapVietnameseMemberToEnglish));
-      } else {
+      // Group items by order_id
+      const itemsByOrder = new Map<string, any[]>();
+      (itemsResult.data || []).forEach((item: any) => {
+        const orderId = item.id_don_hang;
+        if (orderId) {
+          if (!itemsByOrder.has(orderId)) {
+            itemsByOrder.set(orderId, []);
+          }
+          itemsByOrder.get(orderId)!.push(item);
+        }
+      });
+
+      console.log('📦 Loaded orders and items:', {
+        ordersCount: (ordersResult.data || []).length,
+        itemsCount: (itemsResult.data || []).length,
+        itemsByOrderCount: itemsByOrder.size,
+        sampleOrder: ordersResult.data?.[0] ? {
+          id: ordersResult.data[0].id,
+          itemsCount: itemsByOrder.get(ordersResult.data[0].id)?.length || 0
+        } : null
+      });
+
+      // Map orders với items (bao gồm cả orders không có items)
+      const ordersList: Order[] = (ordersResult.data || []).map((order: any) => {
+        return mapVietnameseOrderToEnglish({
+          ...order,
+          danh_sach_dich_vu: itemsByOrder.get(order.id) || []
+        });
+      });
+
+      setOrders(ordersList);
+    } catch (error) {
+      console.error('Error loading orders:', error);
+      setOrders([]);
+    }
+  };
+
+  const loadInventory = async () => {
+    try {
+      const { data, error } = await supabase
+        .from(DB_TABLES.INVENTORY)
+        .select('id, ma_sku, ten_vat_tu, danh_muc, so_luong_ton, don_vi_tinh, nguong_toi_thieu, gia_nhap, nha_cung_cap, lan_nhap_cuoi, anh_vat_tu')
+        .order('ten_vat_tu', { ascending: true })
+        .limit(100); // Giới hạn để tăng tốc độ
+
+      if (error) throw error;
+
+      const list: InventoryItem[] = (data || []).map(mapVietnameseInventoryToEnglish);
+      setInventory(list);
+    } catch (error) {
+      console.error('Error loading inventory:', error);
+      setInventory([]);
+    }
+  };
+
+  const loadMembers = async () => {
+    try {
+      const startTime = performance.now();
+      const { data, error } = await supabase
+        .from(DB_TABLES.MEMBERS)
+        .select('id, ho_ten, vai_tro, sdt, email, trang_thai, anh_dai_dien, phong_ban') // Không select mat_khau để bảo mật
+        .order('ho_ten', { ascending: true })
+        .limit(100); // Giới hạn để tăng tốc độ
+
+      if (error) {
+        console.error('Error loading members:', error);
+        console.error('Error details:', {
+          message: error.message,
+          details: error.details,
+          hint: error.hint,
+          code: error.code
+        });
         setMembers([]);
+        return;
       }
-    });
 
-    // Lắng nghe Sản phẩm
-    const productsRef = ref(db, DB_PATHS.PRODUCTS);
-    const unsubProducts = onValue(productsRef, (snapshot) => {
-      const data = snapshot.val();
-      if (data) {
-        setProducts(Object.values(data).map(mapVietnameseProductToEnglish));
-      } else {
+      const membersList = (data || []).map(mapVietnameseMemberToEnglish);
+      const loadTime = performance.now() - startTime;
+      
+      setMembers(membersList);
+    } catch (error) {
+      console.error('Error loading members:', error);
+      setMembers([]);
+    }
+  };
+
+  const loadProducts = async () => {
+    try {
+      const startTime = performance.now();
+      const { data, error } = await supabase
+        .from(DB_TABLES.PRODUCTS)
+        .select('id, ten_san_pham, danh_muc, gia_ban, ton_kho, anh_san_pham, mo_ta')
+        .order('ten_san_pham', { ascending: true })
+        .limit(100); // Giảm limit để tăng tốc độ
+
+      if (error) {
+        console.error('Error loading products:', error);
         setProducts([]);
+        return;
       }
-    });
 
-    // Lắng nghe Khách hàng
-    const customersRef = ref(db, DB_PATHS.CUSTOMERS);
-    const unsubCustomers = onValue(customersRef, (snapshot) => {
-      const data = snapshot.val();
-      if (data) {
-        setCustomers(Object.values(data).map(mapVietnameseCustomerToEnglish));
-      } else {
+      const productsList = (data || []).map(mapVietnameseProductToEnglish);
+      const loadTime = performance.now() - startTime;
+      
+      setProducts(productsList);
+    } catch (error) {
+      console.error('Error loading products:', error);
+      setProducts([]);
+    }
+  };
+
+  const loadCustomers = async () => {
+    try {
+      const startTime = performance.now();
+      const { data, error } = await supabase
+        .from(DB_TABLES.CUSTOMERS)
+        .select('id, ten, sdt, email, dia_chi, hang_thanh_vien, tong_chi_tieu, lan_cuoi_ghe, ghi_chu, nguon_khach, trang_thai, id_nhan_vien_phu_trach, so_lan_tuong_tac, nhom_khach')
+        .order('ten', { ascending: true })
+        .limit(100); // Giảm limit để tăng tốc độ
+
+      if (error) {
+        console.error('Error loading customers:', error);
         setCustomers([]);
+        return;
       }
-    });
 
+      const customersList = (data || []).map(mapVietnameseCustomerToEnglish);
+      const loadTime = performance.now() - startTime;
+      
+      setCustomers(customersList);
+    } catch (error) {
+      console.error('Error loading customers:', error);
+      setCustomers([]);
+    }
+  };
+
+  useEffect(() => {
+    const startTime = performance.now();
+    
+    // Set loading = false NGAY LẬP TỨC để UI hiển thị (không block UI)
     setIsLoading(false);
 
-    // Cleanup listeners
+    // Load TẤT CẢ data song song cùng lúc (không block UI)
+    Promise.allSettled([
+      loadOrders(),
+      loadInventory(),
+      loadMembers(),
+      loadProducts(),
+      loadCustomers()
+    ])
+      .then(() => {
+        const totalTime = performance.now() - startTime;
+      })
+      .catch((err) => {
+        console.error('Error loading data:', err);
+      });
+
+    // Setup real-time listeners SAU KHI load xong (delay 3s để không làm chậm initial load)
+    let channel: any = null;
+    const setupRealtime = () => {
+      // Debounce function để tránh reload quá nhiều
+      let reloadTimeout: NodeJS.Timeout;
+      const debouncedReload = (fn: () => void) => {
+        clearTimeout(reloadTimeout);
+        reloadTimeout = setTimeout(fn, 3000); // Tăng debounce lên 3s để giảm load
+      };
+
+      channel = supabase
+        .channel('app-changes')
+        .on('postgres_changes', 
+          { event: '*', schema: 'public', table: DB_TABLES.ORDERS },
+          () => debouncedReload(loadOrders)
+        )
+        .on('postgres_changes', 
+          { event: '*', schema: 'public', table: DB_TABLES.SERVICE_ITEMS },
+          () => debouncedReload(loadOrders)
+        )
+        .on('postgres_changes', 
+          { event: '*', schema: 'public', table: DB_TABLES.INVENTORY },
+          () => debouncedReload(loadInventory)
+        )
+        .on('postgres_changes', 
+          { event: '*', schema: 'public', table: DB_TABLES.MEMBERS },
+          () => debouncedReload(loadMembers)
+        )
+        .on('postgres_changes', 
+          { event: '*', schema: 'public', table: DB_TABLES.PRODUCTS },
+          () => debouncedReload(loadProducts)
+        )
+        .on('postgres_changes', 
+          { event: '*', schema: 'public', table: DB_TABLES.CUSTOMERS },
+          () => debouncedReload(loadCustomers)
+        )
+        .subscribe();
+    };
+
+    // Setup realtime sau 5 giây để không làm chậm initial load
+    const realtimeTimeout = setTimeout(setupRealtime, 5000);
+
     return () => {
-      unsubOrders();
-      unsubInventory();
-      unsubMembers();
-      unsubProducts();
-      unsubCustomers();
+      clearTimeout(realtimeTimeout);
+      if (channel) {
+        supabase.removeChannel(channel);
+      }
     };
   }, []);
 
+
   // --- 2. Thêm Đơn Hàng & Trừ Kho ---
   const addOrder = async (newOrder: Order) => {
-    console.log('💾 Saving order to Firebase:', {
-      orderId: newOrder.id,
-      items: newOrder.items.map(item => ({
-        id: item.id,
-        name: item.name,
-        serviceId: item.serviceId,
-        workflowId: item.workflowId,
-        status: item.status
-      }))
-    });
+    try {
+      // Lưu đơn hàng vào Supabase (KHÔNG gửi id - để database tự tạo)
+      const orderData = {
+        id_khach_hang: newOrder.customerId,
+        ten_khach_hang: newOrder.customerName,
+        tong_tien: newOrder.totalAmount,
+        tien_coc: newOrder.deposit || 0,
+        trang_thai: mapOrderStatusDisplayToDb(newOrder.status),
+        ngay_du_kien_giao: formatDateForDB(newOrder.expectedDelivery),
+        ghi_chu: newOrder.notes || ''
+      };
 
-    // Remove undefined values before saving to Firebase
-    const cleanedOrder = removeUndefined(newOrder);
+      // Insert order và lấy ID ngay (cần ID để link items)
+      const { data: savedOrder, error: orderError } = await supabase
+        .from(DB_TABLES.ORDERS)
+        .insert(orderData)
+        .select('id')
+        .single();
 
-    // Lưu đơn hàng vào Firebase với Key là ID của đơn
-    await set(ref(db, `${DB_PATHS.ORDERS}/${newOrder.id}`), cleanedOrder);
+      if (orderError) throw orderError;
 
-    // Tính toán trừ kho dựa trên workflowId của item
-    const currentInventory = [...inventory];
-    let inventoryUpdated = false;
+      const orderId = savedOrder?.id;
+      if (!orderId) throw new Error('Không thể lấy ID đơn hàng sau khi tạo');
 
-    newOrder.items.forEach(item => {
-      // Chỉ trừ kho cho items không phải product và có workflowId
-      if (!item.isProduct && item.workflowId) {
-        // Tìm workflow từ Firebase workflows
-        const workflow = workflows.find(w => w.id === item.workflowId);
+      // Lưu từng item vào bảng hang_muc_dich_vu (KHÔNG gửi id - để database tự tạo)
+      const itemsToInsert = newOrder.items.map(item => {
+        const itemData: any = {
+          id_don_hang: orderId, // Dùng orderId từ database
+          ten_hang_muc: item.name,
+          loai: mapServiceTypeToDb(item.type),
+          don_gia: item.price,
+          so_luong: item.quantity || 1,
+          trang_thai: item.status || 'cho_xu_ly', // Default status nếu không có
+          la_san_pham: item.isProduct || false
+        };
+
+        // Chỉ thêm optional fields nếu có giá trị
+        if (item.technicianId) itemData.id_ky_thuat_vien = item.technicianId;
+        if (item.beforeImage) itemData.anh_truoc = item.beforeImage;
+        if (item.afterImage) itemData.anh_sau = item.afterImage;
+        if (item.serviceId) itemData.id_dich_vu_goc = item.serviceId;
         
-        if (workflow && workflow.materials && Array.isArray(workflow.materials)) {
-          workflow.materials.forEach(mat => {
-            // Support both inventoryItemId and itemId for backward compatibility
-            const inventoryItemId = mat.inventoryItemId || mat.itemId;
-            const invItem = currentInventory.find(i => i.id === inventoryItemId);
-            
-            if (invItem && mat.quantity) {
-              const deductAmount = mat.quantity * (item.quantity || 1);
-              const newQuantity = Math.max(0, invItem.quantity - deductAmount);
+        // QUAN TRỌNG: Luôn lưu workflowId nếu có (không chỉ khi truthy)
+        if (item.workflowId) {
+          itemData.id_quy_trinh = item.workflowId;
+        } else if (item.serviceId) {
+          // Nếu không có workflowId nhưng có serviceId, thử lấy từ service
+          console.warn('⚠️ Item không có workflowId, nhưng có serviceId:', item.serviceId);
+        }
+        
+        if (item.history && item.history.length > 0) itemData.lich_su_thuc_hien = item.history;
+        if (item.lastUpdated) itemData.cap_nhat_cuoi = item.lastUpdated;
+        if (item.technicalLog && item.technicalLog.length > 0) itemData.nhat_ky_ky_thuat = item.technicalLog;
 
-              // Cập nhật trực tiếp item trong kho lên Firebase
-              update(ref(db, `${DB_PATHS.INVENTORY}/${invItem.id}`), {
-                quantity: newQuantity
-              });
-              inventoryUpdated = true;
+        return itemData;
+      });
+
+      console.log('💾 Saving items to database:', {
+        orderId,
+        itemsCount: itemsToInsert.length,
+        items: itemsToInsert.map(i => ({
+          ten_hang_muc: i.ten_hang_muc,
+          loai: i.loai,
+          don_gia: i.don_gia,
+          id_dich_vu_goc: i.id_dich_vu_goc,
+          id_quy_trinh: i.id_quy_trinh,
+          la_san_pham: i.la_san_pham
+        }))
+      });
+
+      if (itemsToInsert.length > 0) {
+        // Batch insert tất cả items cùng lúc
+        const { data: insertedItems, error: itemsError } = await supabase
+          .from(DB_TABLES.SERVICE_ITEMS)
+          .insert(itemsToInsert)
+          .select();
+
+        if (itemsError) {
+          console.error('❌ Error saving items:', itemsError);
+          throw itemsError;
+        }
+
+        console.log('✅ Items saved successfully:', {
+          insertedCount: insertedItems?.length || 0,
+          insertedItems: insertedItems
+        });
+      } else {
+        console.warn('⚠️ No items to insert');
+      }
+
+      // Tính toán trừ kho dựa trên workflowId của item (batch update)
+      const currentInventory = [...inventory];
+      const inventoryUpdates = new Map<string, number>(); // Map<itemId, newQuantity>
+
+      for (const item of newOrder.items) {
+        // Chỉ trừ kho cho items không phải product và có workflowId
+        if (!item.isProduct && item.workflowId) {
+          // Tìm workflow từ workflows
+          const workflow = workflows.find(w => w.id === item.workflowId);
+          
+          if (workflow && workflow.materials && Array.isArray(workflow.materials)) {
+            for (const mat of workflow.materials) {
+              const inventoryItemId = mat.inventoryItemId || mat.itemId;
+              const invItem = currentInventory.find(i => i.id === inventoryItemId);
               
-              console.log('📦 Trừ kho:', {
-                inventoryItem: invItem.name,
-                inventoryItemId: invItem.id,
-                deductAmount,
-                oldQuantity: invItem.quantity,
-                newQuantity,
-                workflowId: item.workflowId,
-                workflowName: workflow.label
-              });
+              if (invItem && mat.quantity) {
+                const deductAmount = mat.quantity * (item.quantity || 1);
+                const currentQty = inventoryUpdates.get(invItem.id) ?? invItem.quantity;
+                const newQuantity = Math.max(0, currentQty - deductAmount);
+                inventoryUpdates.set(invItem.id, newQuantity);
+              }
             }
-          });
-        } else {
-          console.warn('⚠️ Không tìm thấy workflow hoặc materials:', {
-            workflowId: item.workflowId,
-            workflowFound: !!workflow,
-            hasMaterials: workflow?.materials ? true : false
-          });
+          }
         }
       }
-    });
+
+      // Batch update tất cả inventory items cùng lúc (tối ưu: không block, xử lý lỗi sau)
+      if (inventoryUpdates.size > 0) {
+        // Sử dụng Promise.allSettled để không block, xử lý lỗi sau
+        Promise.allSettled(
+          Array.from(inventoryUpdates.entries()).map(([itemId, newQuantity]) => 
+            supabase
+              .from(DB_TABLES.INVENTORY)
+              .update({ so_luong_ton: newQuantity })
+              .eq('id', itemId)
+          )
+        ).then(results => {
+          results.forEach((result, index) => {
+            if (result.status === 'rejected' || (result.status === 'fulfilled' && result.value.error)) {
+              const itemId = Array.from(inventoryUpdates.keys())[index];
+              console.error(`Error updating inventory item ${itemId}:`, 
+                result.status === 'rejected' ? result.reason : result.value.error);
+            }
+          });
+          console.log(`📦 Đã cập nhật ${inventoryUpdates.size} vật tư trong kho`);
+        });
+      }
+    } catch (error) {
+      console.error('Error saving order:', error);
+      throw error;
+    }
   };
 
   // --- 2.5. Cập nhật Đơn Hàng ---
   const updateOrder = async (orderId: string, updatedOrder: Order) => {
-    await set(ref(db, `${DB_PATHS.ORDERS}/${orderId}`), updatedOrder);
+    try {
+      // Update order
+      const orderData = {
+        id_khach_hang: updatedOrder.customerId,
+        ten_khach_hang: updatedOrder.customerName,
+        tong_tien: updatedOrder.totalAmount,
+        tien_coc: updatedOrder.deposit || 0,
+        trang_thai: mapOrderStatusDisplayToDb(updatedOrder.status),
+        ngay_du_kien_giao: formatDateForDB(updatedOrder.expectedDelivery),
+        ghi_chu: updatedOrder.notes || ''
+      };
+
+      const { error: orderError } = await supabase
+        .from(DB_TABLES.ORDERS)
+        .update(orderData)
+        .eq('id', orderId);
+
+      if (orderError) throw orderError;
+
+      // Dùng upsert thay vì delete + insert (nhanh hơn)
+      if (updatedOrder.items.length > 0) {
+        const itemsToUpsert = updatedOrder.items.map(item => {
+          const itemData: any = {
+            id: item.id,
+            id_don_hang: orderId,
+            ten_hang_muc: item.name,
+            loai: mapServiceTypeToDb(item.type),
+            don_gia: item.price,
+            so_luong: item.quantity || 1,
+            trang_thai: item.status,
+            la_san_pham: item.isProduct || false
+          };
+
+          // Chỉ thêm optional fields nếu có giá trị
+          if (item.technicianId) itemData.id_ky_thuat_vien = item.technicianId;
+          if (item.beforeImage) itemData.anh_truoc = item.beforeImage;
+          if (item.afterImage) itemData.anh_sau = item.afterImage;
+          if (item.serviceId) itemData.id_dich_vu_goc = item.serviceId;
+          if (item.workflowId) itemData.id_quy_trinh = item.workflowId;
+          if (item.history && item.history.length > 0) itemData.lich_su_thuc_hien = item.history;
+          if (item.lastUpdated) itemData.cap_nhat_cuoi = item.lastUpdated;
+          if (item.technicalLog && item.technicalLog.length > 0) itemData.nhat_ky_ky_thuat = item.technicalLog;
+
+          return itemData;
+        });
+
+        // Upsert (insert or update) tất cả items cùng lúc
+        const { error: itemsError } = await supabase
+          .from(DB_TABLES.SERVICE_ITEMS)
+          .upsert(itemsToUpsert, { onConflict: 'id' });
+
+        if (itemsError) throw itemsError;
+
+        // Xóa items không còn trong danh sách
+        const currentItemIds = new Set(updatedOrder.items.map(i => i.id));
+        const { data: existingItems } = await supabase
+          .from(DB_TABLES.SERVICE_ITEMS)
+          .select('id')
+          .eq('id_don_hang', orderId);
+
+        if (existingItems) {
+          const itemsToDelete = existingItems
+            .filter(item => !currentItemIds.has(item.id))
+            .map(item => item.id);
+
+          if (itemsToDelete.length > 0) {
+            await supabase
+              .from(DB_TABLES.SERVICE_ITEMS)
+              .delete()
+              .in('id', itemsToDelete);
+          }
+        }
+      } else {
+        // Nếu không có items, xóa tất cả
+        await supabase
+          .from(DB_TABLES.SERVICE_ITEMS)
+          .delete()
+          .eq('id_don_hang', orderId);
+      }
+    } catch (error) {
+      console.error('Error updating order:', error);
+      throw error;
+    }
   };
 
   // --- 2.6. Xóa Đơn Hàng ---
   const deleteOrder = async (orderId: string) => {
-    await remove(ref(db, `${DB_PATHS.ORDERS}/${orderId}`));
+    try {
+      // Items will be deleted automatically due to CASCADE
+      const { error } = await supabase
+        .from(DB_TABLES.ORDERS)
+        .delete()
+        .eq('id', orderId);
+
+      if (error) throw error;
+    } catch (error) {
+      console.error('Error deleting order:', error);
+      throw error;
+    }
   };
 
   // Helper function to remove undefined values from object
@@ -316,227 +856,515 @@ export const AppProvider: React.FC<{ children: ReactNode }> = ({ children }) => 
 
   // --- 2.7. Xóa Item khỏi Đơn Hàng ---
   const deleteOrderItem = async (orderId: string, itemId: string) => {
-    const order = orders.find(o => o.id === orderId);
-    if (!order) return;
+    try {
+      // Xóa item từ bảng hang_muc_dich_vu
+      const { error: deleteError } = await supabase
+        .from(DB_TABLES.SERVICE_ITEMS)
+        .delete()
+        .eq('id', itemId)
+        .eq('id_don_hang', orderId);
 
-    // Lọc bỏ item khỏi danh sách và làm sạch undefined
-    const updatedItems = order.items
-      .filter(item => item.id !== itemId)
-      .map(item => {
-        const cleaned: any = {
-          id: item.id,
-          name: item.name,
-          type: item.type,
-          price: item.price,
-          quantity: item.quantity || 1,
-          status: item.status
-        };
+      if (deleteError) throw deleteError;
 
-        // Chỉ thêm optional fields nếu có giá trị
-        if (item.beforeImage) cleaned.beforeImage = item.beforeImage;
-        if (item.afterImage) cleaned.afterImage = item.afterImage;
-        if (item.isProduct !== undefined) cleaned.isProduct = item.isProduct;
-        if (item.serviceId) cleaned.serviceId = item.serviceId;
-        if (item.technicianId) cleaned.technicianId = item.technicianId;
-        if (item.history && item.history.length > 0) cleaned.history = item.history;
-        if (item.lastUpdated) cleaned.lastUpdated = item.lastUpdated;
-        if (item.technicalLog && item.technicalLog.length > 0) cleaned.technicalLog = item.technicalLog;
+      // Tính lại tổng tiền từ các items còn lại
+      const order = orders.find(o => o.id === orderId);
+      if (order) {
+        const remainingItems = order.items.filter(item => item.id !== itemId);
+        const newTotalAmount = remainingItems.reduce((acc, item) => acc + item.price, 0);
 
-        return cleaned;
-      });
-
-    // Tính lại tổng tiền
-    const newTotalAmount = updatedItems.reduce((acc, item) => acc + item.price, 0);
-
-    // Cập nhật order và làm sạch undefined
-    const updatedOrder: any = {
-      id: order.id,
-      customerId: order.customerId,
-      customerName: order.customerName,
-      items: updatedItems,
-      totalAmount: newTotalAmount,
-      deposit: order.deposit || 0,
-      status: order.status,
-      createdAt: order.createdAt,
-      expectedDelivery: order.expectedDelivery,
-      notes: order.notes || ''
-    };
-
-    // Loại bỏ tất cả undefined trước khi lưu
-    const cleanedOrder = removeUndefined(updatedOrder);
-    await set(ref(db, `${DB_PATHS.ORDERS}/${orderId}`), cleanedOrder);
+        // Cập nhật tổng tiền của đơn hàng
+        await supabase
+          .from(DB_TABLES.ORDERS)
+          .update({ tong_tien: newTotalAmount })
+          .eq('id', orderId);
+      }
+    } catch (error) {
+      console.error('Error deleting order item:', error);
+      throw error;
+    }
   };
 
   // --- 3. Cập nhật Trạng thái Quy trình ---
   const updateOrderItemStatus = async (orderId: string, itemId: string, newStatus: string, user: string, note?: string) => {
-    // 1. Lấy dữ liệu đơn hàng hiện tại để tìm index của item
-    const order = orders.find(o => o.id === orderId);
-    if (!order) return;
+    try {
+      // Lấy item hiện tại từ Supabase
+      const { data: itemData, error: fetchError } = await supabase
+        .from(DB_TABLES.SERVICE_ITEMS)
+        .select('*')
+        .eq('id', itemId)
+        .eq('id_don_hang', orderId)
+        .single();
 
-    // Find item by ID (could be old format or new format {orderId}-{serviceId})
-    let itemIndex = order.items.findIndex(i => i.id === itemId);
-    
-    // If not found, try to find by serviceId if itemId is in format {orderId}-{serviceId}
-    if (itemIndex === -1 && itemId.includes('-')) {
-      const parts = itemId.split('-');
-      if (parts.length >= 2) {
-        // Try to find by serviceId (last part after last dash)
-        const serviceId = parts[parts.length - 1];
-        itemIndex = order.items.findIndex(i => i.serviceId === serviceId);
+      if (fetchError || !itemData) {
+        console.error('Item not found:', fetchError);
+        return;
       }
-    }
-    
-    if (itemIndex === -1) return;
 
-    const item = order.items[itemIndex];
-    const now = Date.now();
+      const now = Date.now();
+      const currentHistory = (itemData.lich_su_thuc_hien || []) as any[];
+      let newHistory = [...currentHistory];
 
-    // Xử lý lịch sử (History)
-    const currentHistory = item.history || [];
-    let newHistory = [...currentHistory];
-
-    // Đóng stage cũ
-    if (newHistory.length > 0) {
-      const lastEntryIndex = newHistory.length - 1;
-      const lastEntry = newHistory[lastEntryIndex];
-      if (!lastEntry.leftAt) {
-        newHistory[lastEntryIndex] = {
-          ...lastEntry,
-          leftAt: now,
-          duration: now - lastEntry.enteredAt
-        };
+      // Đóng stage cũ
+      if (newHistory.length > 0) {
+        const lastEntryIndex = newHistory.length - 1;
+        const lastEntry = newHistory[lastEntryIndex];
+        if (!lastEntry.leftAt) {
+          newHistory[lastEntryIndex] = {
+            ...lastEntry,
+            leftAt: now,
+            duration: now - lastEntry.enteredAt
+          };
+        }
       }
-    }
 
-    // Mở stage mới
-    newHistory.push({
-      stageId: newStatus,
-      stageName: newStatus,
-      enteredAt: now,
-      performedBy: user
-    });
-
-    // Xử lý Log (Ghi chú)
-    let newLog = item.technicalLog ? [...item.technicalLog] : [];
-    if (note) {
-      newLog.push({
-        id: Date.now().toString(),
-        content: note,
-        author: user,
-        timestamp: new Date().toLocaleString('vi-VN'),
-        stage: newStatus
+      // Mở stage mới
+      // newStatus là UUID của stage, cần lấy stage name từ workflows
+      // Tạm thời lưu UUID, stage name sẽ được map từ workflows khi load
+      newHistory.push({
+        stageId: newStatus,
+        stageName: newStatus, // Sẽ được map từ workflows khi load lại
+        enteredAt: now,
+        performedBy: user
       });
+
+      // Xử lý Log (Ghi chú)
+      let newLog = (itemData.nhat_ky_ky_thuat || []) as any[];
+      if (note) {
+        newLog.push({
+          id: Date.now().toString(),
+          content: note,
+          author: user,
+          timestamp: new Date().toLocaleString('vi-VN'),
+          stage: newStatus
+        });
+      }
+
+      // Cập nhật lên Supabase
+      console.log('📤 Updating order item status in database:', {
+        itemId,
+        orderId,
+        newStatus,
+        historyEntries: newHistory.length,
+        logEntries: newLog.length
+      });
+      
+      const { error: updateError } = await supabase
+        .from(DB_TABLES.SERVICE_ITEMS)
+        .update({
+          trang_thai: newStatus,
+          lich_su_thuc_hien: newHistory,
+          cap_nhat_cuoi: now,
+          nhat_ky_ky_thuat: newLog
+        })
+        .eq('id', itemId)
+        .eq('id_don_hang', orderId);
+
+      if (updateError) {
+        console.error('❌ Error updating order item status:', {
+          error: updateError,
+          code: updateError.code,
+          message: updateError.message,
+          hint: updateError.hint,
+          details: updateError.details
+        });
+        throw updateError;
+      }
+      
+      console.log('✅ Order item status updated successfully:', {
+        itemId,
+        orderId,
+        newStatus,
+        historyEntries: newHistory.length,
+        logEntries: newLog.length
+      });
+      
+      // Update local state immediately (don't wait for real-time subscription)
+      setOrders(prevOrders => {
+        return prevOrders.map(order => {
+          if (order.id === orderId) {
+            return {
+              ...order,
+              items: order.items.map(item => {
+                if (item.id === itemId) {
+                  return {
+                    ...item,
+                    status: newStatus,
+                    history: newHistory as any,
+                    technicalLog: newLog as any,
+                    lastUpdated: now
+                  };
+                }
+                return item;
+              })
+            };
+          }
+          return order;
+        });
+      });
+      
+    } catch (error) {
+      console.error('❌ Error updating order item status:', error);
+      throw error;
     }
-
-    // Ensure item ID is in format {orderId}-{serviceId} if serviceId exists
-    const finalItemId = item.serviceId 
-      ? `${orderId}-${item.serviceId}`
-      : item.id;
-
-    // Cập nhật lên Firebase (chỉ cập nhật các trường thay đổi của item cụ thể)
-    const updates: any = {};
-    updates[`${DB_PATHS.ORDERS}/${orderId}/items/${itemIndex}/id`] = finalItemId;
-    updates[`${DB_PATHS.ORDERS}/${orderId}/items/${itemIndex}/status`] = newStatus;
-    updates[`${DB_PATHS.ORDERS}/${orderId}/items/${itemIndex}/history`] = newHistory;
-    updates[`${DB_PATHS.ORDERS}/${orderId}/items/${itemIndex}/lastUpdated`] = now;
-    updates[`${DB_PATHS.ORDERS}/${orderId}/items/${itemIndex}/technicalLog`] = newLog;
-
-    await update(ref(db), updates);
   };
 
   // --- 4. Thêm Ghi chú kỹ thuật ---
   const addTechnicianNote = async (orderId: string, itemId: string, content: string, user: string) => {
-    const order = orders.find(o => o.id === orderId);
-    if (!order) return;
-    const itemIndex = order.items.findIndex(i => i.id === itemId);
-    if (itemIndex === -1) return;
+    try {
+      // Lấy item hiện tại
+      const { data: itemData, error: fetchError } = await supabase
+        .from(DB_TABLES.SERVICE_ITEMS)
+        .select('*')
+        .eq('id', itemId)
+        .eq('id_don_hang', orderId)
+        .single();
 
-    const item = order.items[itemIndex];
-    const newLog: TechnicalLog = {
-      id: Date.now().toString(),
-      content: content,
-      author: user,
-      timestamp: new Date().toLocaleString('vi-VN'),
-      stage: item.status
-    };
+      if (fetchError || !itemData) {
+        console.error('Item not found:', fetchError);
+        return;
+      }
 
-    const currentLogs = item.technicalLog || [];
-    const updatedLogs = [newLog, ...currentLogs];
+      const newLog: TechnicalLog = {
+        id: Date.now().toString(),
+        content: content,
+        author: user,
+        timestamp: new Date().toLocaleString('vi-VN'),
+        stage: itemData.trang_thai
+      };
 
-    // Update Firebase
-    await update(ref(db, `${DB_PATHS.ORDERS}/${orderId}/items/${itemIndex}`), {
-      technicalLog: updatedLogs
-    });
+      const currentLogs = (itemData.nhat_ky_ky_thuat || []) as any[];
+      const updatedLogs = [newLog, ...currentLogs];
+
+      // Update Supabase
+      const { error: updateError } = await supabase
+        .from(DB_TABLES.SERVICE_ITEMS)
+        .update({ nhat_ky_ky_thuat: updatedLogs })
+        .eq('id', itemId)
+        .eq('id_don_hang', orderId);
+
+      if (updateError) throw updateError;
+    } catch (error) {
+      console.error('Error adding technician note:', error);
+      throw error;
+    }
   };
 
   const updateInventory = async (items: InventoryItem[]) => {
-    // Cập nhật toàn bộ hoặc từng item, ở đây demo cập nhật item đầu tiên thay đổi
-    // Trong thực tế nên update từng cái
-    const updates: any = {};
-    items.forEach(item => {
-      updates[`${DB_PATHS.INVENTORY}/${item.id}`] = item;
-    });
-    await update(ref(db), updates);
+    try {
+      for (const item of items) {
+        const itemData = {
+          ma_sku: item.sku,
+          ten_vat_tu: item.name,
+          danh_muc: item.category,
+          so_luong_ton: item.quantity,
+          don_vi_tinh: item.unit,
+          nguong_toi_thieu: item.minThreshold || 0,
+          gia_nhap: item.importPrice || 0,
+          nha_cung_cap: item.supplier || null,
+          lan_nhap_cuoi: item.lastImport || null,
+          anh_vat_tu: item.image || null
+        };
+
+        await supabase
+          .from(DB_TABLES.INVENTORY)
+          .update(itemData)
+          .eq('id', item.id);
+      }
+    } catch (error) {
+      console.error('Error updating inventory:', error);
+      throw error;
+    }
   };
 
   // Cập nhật một vật tư cụ thể
   const updateInventoryItem = async (itemId: string, updatedItem: InventoryItem) => {
-    // Remove undefined values before saving to Firebase
-    const cleanedItem = removeUndefined(updatedItem);
-    await set(ref(db, `${DB_PATHS.INVENTORY}/${itemId}`), cleanedItem);
+    try {
+      const itemData = {
+        ma_sku: updatedItem.sku,
+        ten_vat_tu: updatedItem.name,
+        danh_muc: updatedItem.category,
+        so_luong_ton: updatedItem.quantity,
+        don_vi_tinh: updatedItem.unit,
+        nguong_toi_thieu: updatedItem.minThreshold || 0,
+        gia_nhap: updatedItem.importPrice || 0,
+        nha_cung_cap: updatedItem.supplier || null,
+        lan_nhap_cuoi: updatedItem.lastImport || null,
+        anh_vat_tu: updatedItem.image || null
+      };
+
+      const { error } = await supabase
+        .from(DB_TABLES.INVENTORY)
+        .update(itemData)
+        .eq('id', itemId);
+
+      if (error) throw error;
+    } catch (error) {
+      console.error('Error updating inventory item:', error);
+      throw error;
+    }
   };
 
   // Xóa một vật tư
   const deleteInventoryItem = async (itemId: string) => {
-    await remove(ref(db, `${DB_PATHS.INVENTORY}/${itemId}`));
+    try {
+      const { error } = await supabase
+        .from(DB_TABLES.INVENTORY)
+        .delete()
+        .eq('id', itemId);
+
+      if (error) throw error;
+    } catch (error) {
+      console.error('Error deleting inventory item:', error);
+      throw error;
+    }
   };
 
   // Thêm vật tư mới
   const addInventoryItem = async (newItem: InventoryItem) => {
-    // Remove undefined values before saving to Firebase
-    const cleanedItem = removeUndefined(newItem);
-    await set(ref(db, `${DB_PATHS.INVENTORY}/${newItem.id}`), cleanedItem);
+    try {
+      // KHÔNG gửi id - để database tự tạo
+      const itemData = {
+        ma_sku: newItem.sku,
+        ten_vat_tu: newItem.name,
+        danh_muc: newItem.category,
+        so_luong_ton: newItem.quantity,
+        don_vi_tinh: newItem.unit,
+        nguong_toi_thieu: newItem.minThreshold || 0,
+        gia_nhap: newItem.importPrice || 0,
+        nha_cung_cap: newItem.supplier || null,
+        lan_nhap_cuoi: newItem.lastImport || null,
+        anh_vat_tu: newItem.image || null
+      };
+
+      const { error } = await supabase
+        .from(DB_TABLES.INVENTORY)
+        .insert(itemData);
+
+      if (error) throw error;
+    } catch (error) {
+      console.error('Error adding inventory item:', error);
+      throw error;
+    }
   };
 
   // Cập nhật nhân sự
   const updateMember = async (memberId: string, updatedMember: Member) => {
-    await set(ref(db, `${DB_PATHS.MEMBERS}/${memberId}`), updatedMember);
+    try {
+      const memberData = {
+        ho_ten: updatedMember.name,
+        vai_tro: mapRoleDisplayToDb(updatedMember.role),
+        sdt: updatedMember.phone,
+        email: updatedMember.email || null,
+        trang_thai: mapStatusDisplayToDb(updatedMember.status),
+        anh_dai_dien: updatedMember.avatar || null,
+        phong_ban: mapDepartmentDisplayToDb(updatedMember.department)
+      };
+
+      const { data, error } = await supabase
+        .from(DB_TABLES.MEMBERS)
+        .update(memberData)
+        .eq('id', memberId)
+        .select();
+
+      if (error) {
+        console.error('Supabase update error:', error);
+        throw error;
+      }
+
+      console.log('Member updated successfully:', data);
+
+      // Reload dữ liệu ngay sau khi cập nhật thành công
+      await loadMembers();
+    } catch (error) {
+      console.error('Error updating member:', error);
+      throw error;
+    }
   };
 
   // Xóa nhân sự
   const deleteMember = async (memberId: string) => {
-    await remove(ref(db, `${DB_PATHS.MEMBERS}/${memberId}`));
+    try {
+      const { error } = await supabase
+        .from(DB_TABLES.MEMBERS)
+        .delete()
+        .eq('id', memberId);
+
+      if (error) throw error;
+
+      // Reload dữ liệu ngay sau khi xóa thành công
+      await loadMembers();
+    } catch (error) {
+      console.error('Error deleting member:', error);
+      throw error;
+    }
   };
 
   // Thêm nhân sự mới
   const addMember = async (newMember: Member) => {
-    await set(ref(db, `${DB_PATHS.MEMBERS}/${newMember.id}`), newMember);
+    try {
+      // KHÔNG gửi id - để database tự tạo
+      const memberData = {
+        ho_ten: newMember.name,
+        vai_tro: mapRoleDisplayToDb(newMember.role),
+        sdt: newMember.phone,
+        email: newMember.email || null,
+        trang_thai: mapStatusDisplayToDb(newMember.status),
+        anh_dai_dien: newMember.avatar || null,
+        phong_ban: mapDepartmentDisplayToDb(newMember.department)
+      };
+
+      const { error } = await supabase
+        .from(DB_TABLES.MEMBERS)
+        .insert(memberData);
+
+      if (error) throw error;
+
+      // Reload dữ liệu ngay sau khi thêm thành công để hiển thị ngay
+      await loadMembers();
+    } catch (error) {
+      console.error('Error adding member:', error);
+      throw error;
+    }
   };
 
   // Cập nhật sản phẩm
   const updateProduct = async (productId: string, updatedProduct: Product) => {
-    await set(ref(db, `${DB_PATHS.PRODUCTS}/${productId}`), updatedProduct);
+    try {
+      const productData = {
+        ten_san_pham: updatedProduct.name,
+        danh_muc: updatedProduct.category,
+        gia_ban: updatedProduct.price,
+        ton_kho: updatedProduct.stock,
+        anh_san_pham: updatedProduct.image || null,
+        mo_ta: updatedProduct.desc || null
+      };
+
+      const { error } = await supabase
+        .from(DB_TABLES.PRODUCTS)
+        .update(productData)
+        .eq('id', productId);
+
+      if (error) throw error;
+    } catch (error) {
+      console.error('Error updating product:', error);
+      throw error;
+    }
   };
 
   // Xóa sản phẩm
   const deleteProduct = async (productId: string) => {
-    await remove(ref(db, `${DB_PATHS.PRODUCTS}/${productId}`));
+    try {
+      const { error } = await supabase
+        .from(DB_TABLES.PRODUCTS)
+        .delete()
+        .eq('id', productId);
+
+      if (error) throw error;
+    } catch (error) {
+      console.error('Error deleting product:', error);
+      throw error;
+    }
   };
 
   // Thêm sản phẩm mới
   const addProduct = async (newProduct: Product) => {
-    await set(ref(db, `${DB_PATHS.PRODUCTS}/${newProduct.id}`), newProduct);
+    try {
+      // KHÔNG gửi id - để database tự tạo
+      const productData = {
+        ten_san_pham: newProduct.name,
+        danh_muc: newProduct.category,
+        gia_ban: newProduct.price,
+        ton_kho: newProduct.stock,
+        anh_san_pham: newProduct.image || null,
+        mo_ta: newProduct.desc || null
+      };
+
+      // Không select data để tối ưu tốc độ (realtime sẽ update UI)
+      const { error } = await supabase
+        .from(DB_TABLES.PRODUCTS)
+        .insert(productData);
+
+      if (error) throw error;
+    } catch (error) {
+      console.error('Error adding product:', error);
+      throw error;
+    }
   };
 
   // Khách hàng
   const addCustomer = async (newCustomer: Customer) => {
-    await set(ref(db, `${DB_PATHS.CUSTOMERS}/${newCustomer.id}`), newCustomer);
+    try {
+      // KHÔNG gửi id - để database tự tạo
+      const customerData = {
+        ten: newCustomer.name,
+        sdt: newCustomer.phone,
+        email: newCustomer.email || null,
+        dia_chi: newCustomer.address || null,
+        hang_thanh_vien: mapTierDisplayToDb(newCustomer.tier), // Convert tier to database format
+        tong_chi_tieu: newCustomer.totalSpent || 0,
+        lan_cuoi_ghe: newCustomer.lastVisit || null,
+        ghi_chu: newCustomer.notes || null,
+        nguon_khach: newCustomer.source || null,
+        trang_thai: newCustomer.status || null,
+        id_nhan_vien_phu_trach: newCustomer.assigneeId || null,
+        so_lan_tuong_tac: newCustomer.interactionCount || 0,
+        nhom_khach: newCustomer.group || null
+      };
+
+      // Không select data để tối ưu tốc độ (realtime sẽ update UI)
+      const { error } = await supabase
+        .from(DB_TABLES.CUSTOMERS)
+        .insert(customerData);
+
+      if (error) throw error;
+    } catch (error) {
+      console.error('Error adding customer:', error);
+      throw error;
+    }
   };
+
   const updateCustomer = async (customerId: string, updatedCustomer: Customer) => {
-    await set(ref(db, `${DB_PATHS.CUSTOMERS}/${customerId}`), updatedCustomer);
+    try {
+      const customerData = {
+        ten: updatedCustomer.name,
+        sdt: updatedCustomer.phone,
+        email: updatedCustomer.email || null,
+        dia_chi: updatedCustomer.address || null,
+        hang_thanh_vien: mapTierDisplayToDb(updatedCustomer.tier), // Convert tier to database format
+        tong_chi_tieu: updatedCustomer.totalSpent || 0,
+        lan_cuoi_ghe: updatedCustomer.lastVisit || null,
+        ghi_chu: updatedCustomer.notes || null,
+        nguon_khach: updatedCustomer.source || null,
+        trang_thai: updatedCustomer.status || null,
+        id_nhan_vien_phu_trach: updatedCustomer.assigneeId || null,
+        so_lan_tuong_tac: updatedCustomer.interactionCount || 0,
+        nhom_khach: updatedCustomer.group || null
+      };
+
+      const { error } = await supabase
+        .from(DB_TABLES.CUSTOMERS)
+        .update(customerData)
+        .eq('id', customerId);
+
+      if (error) throw error;
+    } catch (error) {
+      console.error('Error updating customer:', error);
+      throw error;
+    }
   };
+
   const deleteCustomer = async (customerId: string) => {
-    await remove(ref(db, `${DB_PATHS.CUSTOMERS}/${customerId}`));
+    try {
+      const { error } = await supabase
+        .from(DB_TABLES.CUSTOMERS)
+        .delete()
+        .eq('id', customerId);
+
+      if (error) throw error;
+    } catch (error) {
+      console.error('Error deleting customer:', error);
+      throw error;
+    }
   };
 
   return (

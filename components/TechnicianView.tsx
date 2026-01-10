@@ -1,10 +1,9 @@
 import React, { useState, useMemo, useEffect, useRef } from 'react';
 import { CheckCircle2, Clock, AlertTriangle, Camera, Upload, Plus, Filter, Save, FileText, User, Trash2 } from 'lucide-react';
 import { useAppStore } from '../context';
-import { ServiceItem, Order, WorkflowDefinition, ServiceCatalogItem } from '../types';
+import { ServiceItem, Order, WorkflowDefinition, ServiceCatalogItem, TodoStep } from '../types';
 import { MOCK_MEMBERS, MOCK_WORKFLOWS, SERVICE_CATALOG } from '../constants';
-import { ref, get, onValue } from 'firebase/database';
-import { db, DB_PATHS } from '../firebase';
+import { supabase, DB_PATHS } from '../supabase';
 
 // Current simulated user
 // Current simulated user
@@ -30,19 +29,58 @@ const mapStatusToStageId = (status: string): string => {
   return statusMap[status] || status.toLowerCase().replace(/\s+/g, '-');
 };
 
+// Helper to map status to Vietnamese display text
+const mapStatusToVietnamese = (status: string): string => {
+  const statusMap: Record<string, string> = {
+    'In Queue': 'Chờ Xử Lý',
+    'cho_xu_ly': 'Chờ Xử Lý',
+    'Cleaning': 'Vệ Sinh',
+    'Repairing': 'Sửa Chữa',
+    'QC': 'Kiểm Tra (QC)',
+    'Ready': 'Hoàn Thành',
+    'Done': 'Hoàn Thành',
+    'Delivered': 'Đã Giao',
+    'Cancelled': 'Đã Hủy',
+    'cancel': 'Đã Hủy'
+  };
+  return statusMap[status] || status || 'Chưa xác định';
+};
+
 // Helper to get workflow stages from serviceId (now accepts workflows and services parameters)
 const getWorkflowStages = (serviceId?: string, workflows?: WorkflowDefinition[], services?: ServiceCatalogItem[]) => {
-  if (!serviceId) return null;
+  if (!serviceId) {
+    console.warn('⚠️ getWorkflowStages: No serviceId provided');
+    return null;
+  }
 
   // Use provided services or fallback to SERVICE_CATALOG
   const serviceList = services || SERVICE_CATALOG;
 
+  console.log('🔍 getWorkflowStages - Searching for service:', {
+    serviceId,
+    servicesCount: serviceList.length,
+    availableServiceIds: serviceList.map(s => s.id).slice(0, 10)
+  });
+
   // Find service in catalog
   const service = serviceList.find(s => s.id === serviceId);
   if (!service) {
-    console.warn('Service not found:', serviceId);
+    console.warn('⚠️ getWorkflowStages: Service not found:', {
+      serviceId,
+      availableServices: serviceList.map(s => ({ id: s.id, name: s.name })).slice(0, 5)
+    });
     return null;
   }
+
+  console.log('✅ getWorkflowStages: Service found:', {
+    serviceId: service.id,
+    serviceName: service.name,
+    hasWorkflows: !!service.workflows,
+    workflowsCount: service.workflows?.length || 0,
+    workflows: service.workflows,
+    hasWorkflowId: !!service.workflowId,
+    workflowId: service.workflowId
+  });
 
   // Get first workflow ID (if multiple workflows, use first one)
   let workflowId: string | undefined;
@@ -52,24 +90,70 @@ const getWorkflowStages = (serviceId?: string, workflows?: WorkflowDefinition[],
     // Sort by order and get first one
     const sortedWorkflows = [...service.workflows].sort((a, b) => a.order - b.order);
     workflowId = sortedWorkflows[0].id;
+    console.log('✅ getWorkflowStages: Using workflow from workflows array:', {
+      workflowId,
+      allWorkflows: service.workflows
+    });
   }
   // Check for old workflowId format
-  else if ('workflowId' in service) {
+  else if ('workflowId' in service && service.workflowId) {
     if (typeof service.workflowId === 'string') {
       workflowId = service.workflowId;
+      console.log('✅ getWorkflowStages: Using workflowId string:', workflowId);
     } else if (Array.isArray(service.workflowId) && service.workflowId.length > 0) {
       workflowId = service.workflowId[0];
+      console.log('✅ getWorkflowStages: Using workflowId array[0]:', workflowId);
     }
   }
 
-  if (!workflowId) return null;
+  if (!workflowId) {
+    console.warn('⚠️ getWorkflowStages: No workflowId found for service:', {
+      serviceId,
+      serviceName: service.name
+    });
+    return null;
+  }
 
   // Find workflow from provided workflows
   const workflowList = workflows || [];
-  const workflow = workflowList.find(wf => wf.id === workflowId);
-  if (!workflow || !workflow.stages || workflow.stages.length === 0) return null;
+  console.log('🔍 getWorkflowStages: Searching for workflow:', {
+    workflowId,
+    workflowsCount: workflowList.length,
+    availableWorkflowIds: workflowList.map(wf => wf.id).slice(0, 10)
+  });
 
-  return workflow.stages.sort((a, b) => a.order - b.order);
+  const workflow = workflowList.find(wf => wf && wf.id === workflowId);
+  if (!workflow) {
+    console.warn('⚠️ getWorkflowStages: Workflow not found:', {
+      workflowId,
+      availableWorkflows: workflowList.map(wf => ({ id: wf.id, label: wf.label })).slice(0, 5)
+    });
+    return null;
+  }
+
+  if (!workflow.stages || workflow.stages.length === 0) {
+    console.warn('⚠️ getWorkflowStages: Workflow has no stages:', {
+      workflowId,
+      workflowLabel: workflow.label
+    });
+    return null;
+  }
+
+  const sortedStages = workflow.stages.sort((a, b) => a.order - b.order);
+  console.log('✅ getWorkflowStages: Found stages:', {
+    workflowId,
+    workflowLabel: workflow.label,
+    stagesCount: sortedStages.length,
+    stages: sortedStages.map(s => ({ 
+      id: s.id, 
+      name: s.name, 
+      order: s.order,
+      todosCount: s.todos?.length || 0,
+      todos: s.todos
+    }))
+  });
+
+  return sortedStages;
 };
 
 // Filter options will be generated dynamically from workflows
@@ -82,7 +166,18 @@ interface FlatTask extends ServiceItem {
   orderNotes?: string;
 }
 
-const WorkflowStep: React.FC<{ title: string; status: string; index: number; currentIndex: number }> = ({ title, status, index, currentIndex }) => {
+interface WorkflowStepProps {
+  title: string;
+  status: string;
+  index: number;
+  currentIndex: number;
+  todos?: TodoStep[];
+  onTodoToggle?: (todoId: string, stageId: string, completed: boolean) => void;
+  assignedMembers?: string[];
+  members?: any[];
+}
+
+const WorkflowStep: React.FC<WorkflowStepProps> = ({ title, status, index, currentIndex, todos, onTodoToggle, assignedMembers, members = [] }) => {
   // Determine visual state based on index comparisons
   let isActive = false;
   let isCompleted = false;
@@ -93,29 +188,105 @@ const WorkflowStep: React.FC<{ title: string; status: string; index: number; cur
     isActive = true;
   }
 
+  // Show todos if available - ALWAYS show todos if they exist
+  const hasTodos = todos && Array.isArray(todos) && todos.length > 0;
+  
+  // Debug log
+  if (hasTodos) {
+    console.log(`📋 WorkflowStep "${title}" (${status}) has ${todos.length} todos:`, todos);
+  }
+
   return (
-    <div className={`relative flex items-center gap-3 p-3 rounded-lg border transition-all duration-300 ${isActive
+    <div className={`relative rounded-lg border transition-all duration-300 ${isActive
       ? 'bg-neutral-800 border-gold-600 shadow-md shadow-black/30 scale-[1.02] z-10'
       : isCompleted
         ? 'bg-emerald-900/20 border-emerald-900/50 opacity-90'
         : 'bg-neutral-900 border-neutral-800 opacity-60'
       }`}>
-      <div className={`w-8 h-8 rounded-full flex items-center justify-center flex-shrink-0 transition-colors ${isCompleted ? 'bg-emerald-600 text-white' : isActive ? 'bg-gold-500 text-black' : 'bg-neutral-800 text-slate-500'
-        }`}>
-        {isCompleted ? <CheckCircle2 size={16} /> : <Clock size={16} />}
+      {/* Header */}
+      <div className="flex items-center gap-3 p-3">
+        <div className={`w-8 h-8 rounded-full flex items-center justify-center flex-shrink-0 transition-colors ${isCompleted ? 'bg-emerald-600 text-white' : isActive ? 'bg-gold-500 text-black' : 'bg-neutral-800 text-slate-500'
+          }`}>
+          {isCompleted ? <CheckCircle2 size={16} /> : <Clock size={16} />}
+        </div>
+        <div className="flex-1">
+          <h4 className={`font-medium text-sm ${isActive ? 'text-slate-100' : 'text-slate-500'}`}>{title}</h4>
+          <div className="flex items-center gap-2 mt-1">
+            {hasTodos && (
+              <span className="text-[10px] text-slate-500">{todos.length} công việc</span>
+            )}
+            {assignedMembers && assignedMembers.length > 0 && (
+              <div className="flex items-center gap-1">
+                {assignedMembers.slice(0, 3).map(memberId => {
+                  const member = members.find(m => m.id === memberId);
+                  if (!member) return null;
+                  return (
+                    <div key={memberId} className="flex items-center" title={member.name}>
+                      {member.avatar ? (
+                        <img src={member.avatar} alt="" className="w-4 h-4 rounded-full border border-neutral-700" />
+                      ) : (
+                        <div className="w-4 h-4 rounded-full bg-neutral-700 flex items-center justify-center text-[8px] font-bold text-slate-300 border border-neutral-600">
+                          {member.name.charAt(0).toUpperCase()}
+                        </div>
+                      )}
+                    </div>
+                  );
+                })}
+                {assignedMembers.length > 3 && (
+                  <span className="text-[9px] text-slate-500">+{assignedMembers.length - 3}</span>
+                )}
+              </div>
+            )}
+          </div>
+        </div>
+        {isActive && (
+          <span className="px-2 py-0.5 bg-gold-600 text-black rounded text-[10px] font-bold shadow-sm uppercase">Đang làm</span>
+        )}
       </div>
-      <div className="flex-1">
-        <h4 className={`font-medium text-sm ${isActive ? 'text-slate-100' : 'text-slate-500'}`}>{title}</h4>
+
+      {/* Todos - ALWAYS show if available, or show empty state */}
+      <div className={`px-3 pb-3 pt-0 space-y-2 border-t ${isActive ? 'border-gold-600/30' : isCompleted ? 'border-emerald-900/30' : 'border-neutral-800'}`}>
+        {hasTodos ? (
+          todos!.map((todo) => (
+            <label
+              key={todo.id}
+              className={`flex items-start gap-2 p-2 rounded cursor-pointer transition-all hover:bg-neutral-800/50 ${
+                todo.completed ? 'opacity-75' : ''
+              }`}
+            >
+              <input
+                type="checkbox"
+                checked={todo.completed}
+                onChange={(e) => {
+                  if (onTodoToggle) {
+                    onTodoToggle(todo.id, status, e.target.checked);
+                  }
+                }}
+                disabled={!isActive && !isCompleted}
+                className="mt-0.5 w-4 h-4 rounded border-neutral-600 bg-neutral-800 text-gold-500 focus:ring-gold-500 focus:ring-offset-0 focus:ring-2 cursor-pointer disabled:opacity-50 disabled:cursor-not-allowed"
+              />
+              <div className="flex-1">
+                <span className={`text-xs ${todo.completed ? 'line-through text-slate-500' : isActive ? 'text-slate-300' : 'text-slate-500'}`}>
+                  {todo.title}
+                </span>
+                {todo.description && (
+                  <p className="text-[10px] text-slate-600 mt-0.5">{todo.description}</p>
+                )}
+              </div>
+            </label>
+          ))
+        ) : (
+          <div className="py-2 px-2 text-[10px] text-slate-600 italic text-center">
+            Chưa có công việc cho bước này
+          </div>
+        )}
       </div>
-      {isActive && (
-        <span className="px-2 py-0.5 bg-gold-600 text-black rounded text-[10px] font-bold shadow-sm uppercase">Đang làm</span>
-      )}
     </div>
   );
 };
 
 export const TechnicianView: React.FC = () => {
-  const { orders, addTechnicianNote, updateOrderItemStatus, deleteOrderItem, updateOrder } = useAppStore();
+  const { orders, addTechnicianNote, updateOrderItemStatus, deleteOrderItem, updateOrder, members } = useAppStore();
 
   const [activeTaskId, setActiveTaskId] = useState<string | null>(null);
   const [filterStatus, setFilterStatus] = useState('ALL');
@@ -126,31 +297,176 @@ export const TechnicianView: React.FC = () => {
   const [imageUrl, setImageUrl] = useState('');
   const fileInputRef = useRef<HTMLInputElement>(null);
 
-  // Load workflows from Firebase
+  // Load workflows from Supabase
   useEffect(() => {
     const loadWorkflows = async () => {
       try {
-        const snapshot = await get(ref(db, DB_PATHS.WORKFLOWS));
-        if (snapshot.exists()) {
-          const data = snapshot.val();
-          const workflowsList: WorkflowDefinition[] = Object.keys(data).map(key => {
-            const wf = data[key];
-            return {
-              id: wf.id || key,
-              label: wf.label || '',
-              description: wf.description || '',
-              department: wf.department || 'Kỹ Thuật',
-              types: wf.types || [],
-              color: wf.color || 'bg-blue-900/30 text-blue-400 border-blue-800',
-              materials: wf.materials || undefined,
-              stages: wf.stages || undefined,
-              assignedMembers: wf.assignedMembers || undefined
-            } as WorkflowDefinition;
-          });
-          setWorkflows(workflowsList);
+        // Load workflows
+        const { data: workflowsData, error: workflowsError } = await supabase
+          .from(DB_PATHS.WORKFLOWS)
+          .select('id, ten_quy_trinh, mo_ta, phong_ban_phu_trach, loai_ap_dung, vat_tu_can_thiet, nhan_vien_duoc_giao')
+          .order('ngay_tao', { ascending: false })
+          .limit(100);
+
+        if (workflowsError) throw workflowsError;
+
+        // Load stages từ database
+        const { data: stagesData, error: stagesError } = await supabase
+          .from(DB_PATHS.WORKFLOW_STAGES)
+          .select('id, id_quy_trinh, ten_buoc, thu_tu, chi_tiet, tieu_chuan, nhan_vien_duoc_giao')
+          .order('id_quy_trinh, thu_tu', { ascending: true });
+
+        if (stagesError) throw stagesError;
+
+        // Load tasks từ database
+        const stageIds = (stagesData || []).map((s: any) => s.id);
+        console.log('🔍 Loading tasks for stages:', {
+          stageIdsCount: stageIds.length,
+          stageIds: stageIds.slice(0, 5), // Show first 5
+          stages: (stagesData || []).slice(0, 5).map((s: any) => ({
+            id: s.id,
+            name: s.ten_buoc,
+            workflowId: s.id_quy_trinh
+          }))
+        });
+        
+        let tasksData: any[] = [];
+
+        if (stageIds.length > 0) {
+          const { data: tasks, error: tasksError } = await supabase
+            .from(DB_PATHS.WORKFLOW_TASKS)
+            .select('*')
+            .in('id_buoc_quy_trinh', stageIds)
+            .order('thu_tu', { ascending: true });
+
+          if (tasksError) {
+            console.error('❌ Error loading tasks:', {
+              error: tasksError,
+              code: tasksError.code,
+              message: tasksError.message,
+              hint: tasksError.hint,
+              table: DB_PATHS.WORKFLOW_TASKS
+            });
+            // Nếu table không tồn tại, thử check xem table có trong schema không
+            if (tasksError.code === '42P01' || tasksError.message?.includes('does not exist')) {
+              console.error('❌ Table không tồn tại! Cần tạo bảng:', DB_PATHS.WORKFLOW_TASKS);
+            }
+          } else {
+            console.log('📋 Tasks loaded from database:', {
+              tasksCount: tasks?.length || 0,
+              tasks: (tasks || []).slice(0, 10).map((t: any) => ({
+                id: t.id,
+                ten_task: t.ten_task,
+                id_buoc_quy_trinh: t.id_buoc_quy_trinh,
+                thu_tu: t.thu_tu,
+                da_hoan_thanh: t.da_hoan_thanh
+              }))
+            });
+            if (tasks) {
+              tasksData = tasks;
+            }
+            
+            // Nếu không có tasks, log warning
+            if (!tasks || tasks.length === 0) {
+              console.warn('⚠️ Không có tasks nào trong database cho các stages này. Cần tạo tasks trong bảng cac_task_quy_trinh.');
+            }
+          }
         } else {
-          setWorkflows([]);
+          console.warn('⚠️ No stage IDs to load tasks for');
         }
+
+        // Group tasks by stage id
+        const tasksByStage = tasksData.reduce((acc: any, task: any) => {
+          const stageId = task.id_buoc_quy_trinh;
+          if (!stageId) {
+            console.warn('⚠️ Task missing id_buoc_quy_trinh:', task);
+            return acc;
+          }
+          if (!acc[stageId]) {
+            acc[stageId] = [];
+          }
+          acc[stageId].push({
+            id: task.id,
+            title: task.ten_task || task.ten || 'Unnamed Task',
+            description: task.mo_ta || undefined,
+            completed: task.da_hoan_thanh || false,
+            order: task.thu_tu || 0
+          });
+          return acc;
+        }, {});
+
+        console.log('📋 Tasks grouped by stage:', {
+          totalTasks: tasksData.length,
+          stagesWithTasks: Object.keys(tasksByStage).length,
+          stageIdsFromTasks: Object.keys(tasksByStage),
+          tasksByStage: Object.entries(tasksByStage).map(([stageId, todos]: [string, any]) => ({
+            stageId,
+            todosCount: Array.isArray(todos) ? todos.length : 0,
+            todos: Array.isArray(todos) ? todos.map((t: any) => ({ id: t.id, title: t.title })) : []
+          }))
+        });
+        
+        // Debug: Log stage IDs từ stages để so sánh
+        const stageIdsFromStages = (stagesData || []).map((s: any) => s.id);
+        console.log('🔍 Stage IDs from stages data:', {
+          stagesCount: (stagesData || []).length,
+          stageIds: stageIdsFromStages,
+          stageIdsFromTasks: Object.keys(tasksByStage),
+          matchingStageIds: stageIdsFromStages.filter(id => Object.keys(tasksByStage).includes(id)),
+          missingStageIds: stageIdsFromStages.filter(id => !Object.keys(tasksByStage).includes(id))
+        });
+
+        // Group stages by workflow ID
+        const stagesByWorkflow = new Map<string, any[]>();
+        (stagesData || []).forEach((stage: any) => {
+          if (!stagesByWorkflow.has(stage.id_quy_trinh)) {
+            stagesByWorkflow.set(stage.id_quy_trinh, []);
+          }
+          const stageTodos = (tasksByStage[stage.id] || []).sort((a: any, b: any) => a.order - b.order);
+          
+          // Debug: Kiểm tra xem stage.id có trong tasksByStage không
+          const hasTodosInTasksByStage = !!tasksByStage[stage.id];
+          console.log(`🔍 Checking todos for stage "${stage.ten_buoc}" (${stage.id}):`, {
+            stageId: stage.id,
+            hasTodosInTasksByStage,
+            todosCount: stageTodos.length,
+            availableStageIds: Object.keys(tasksByStage),
+            stageIdInAvailable: Object.keys(tasksByStage).includes(stage.id)
+          });
+          
+          const stageData = {
+            id: stage.id,
+            name: stage.ten_buoc,
+            order: stage.thu_tu,
+            details: stage.chi_tiet || undefined,
+            standards: stage.tieu_chuan || undefined,
+            todos: stageTodos.length > 0 ? stageTodos : undefined, // Chỉ set todos nếu có ít nhất 1 todo
+            assignedMembers: stage.nhan_vien_duoc_giao || undefined
+          };
+          
+          stagesByWorkflow.get(stage.id_quy_trinh)!.push(stageData);
+          
+          // Debug log for each stage
+          if (stageTodos.length > 0) {
+            console.log(`✅ Stage "${stage.ten_buoc}" (${stage.id}) has ${stageTodos.length} todos:`, stageTodos);
+          } else {
+            console.log(`⚠️ Stage "${stage.ten_buoc}" (${stage.id}) has NO todos. Available stage IDs with tasks:`, Object.keys(tasksByStage));
+          }
+        });
+
+        // Map workflows với stages
+        const workflowsList: WorkflowDefinition[] = (workflowsData || []).map((wf: any) => ({
+          id: wf.id,
+          label: wf.ten_quy_trinh || '',
+          description: wf.mo_ta || '',
+          department: wf.phong_ban_phu_trach || 'Kỹ Thuật',
+          types: wf.loai_ap_dung || [],
+          materials: wf.vat_tu_can_thiet || undefined,
+          stages: stagesByWorkflow.get(wf.id) || undefined,
+          assignedMembers: wf.nhan_vien_duoc_giao || undefined
+        } as WorkflowDefinition));
+
+        setWorkflows(workflowsList);
       } catch (error) {
         console.error('Error loading workflows:', error);
         setWorkflows([]);
@@ -160,43 +476,34 @@ export const TechnicianView: React.FC = () => {
     loadWorkflows();
 
     // Listen for real-time updates
-    const workflowsRef = ref(db, DB_PATHS.WORKFLOWS);
-    const unsubscribe = onValue(workflowsRef, (snapshot) => {
-      try {
-        if (snapshot.exists()) {
-          const data = snapshot.val();
-          const workflowsList: WorkflowDefinition[] = Object.keys(data).map(key => {
-            const wf = data[key];
-            return {
-              id: wf.id || key,
-              label: wf.label || '',
-              description: wf.description || '',
-              department: wf.department || 'Kỹ Thuật',
-              types: wf.types || [],
-              color: wf.color || 'bg-blue-900/30 text-blue-400 border-blue-800',
-              materials: wf.materials || undefined,
-              stages: wf.stages || undefined,
-              assignedMembers: wf.assignedMembers || undefined
-            } as WorkflowDefinition;
-          });
-          setWorkflows(workflowsList);
-        } else {
-          setWorkflows([]);
+    const channel = supabase
+      .channel('technician-workflows-changes')
+      .on(
+        'postgres_changes',
+        {
+          event: '*',
+          schema: 'public',
+          table: DB_PATHS.WORKFLOWS,
+        },
+        async () => {
+          // Reload workflows on change
+          loadWorkflows();
         }
-      } catch (error) {
-        console.error('Error in real-time listener:', error);
-        setWorkflows([]);
-      }
-    });
+      )
+      .subscribe();
 
-    return () => unsubscribe();
+    return () => {
+      supabase.removeChannel(channel);
+    };
   }, []);
 
-  // Load services from Firebase
+  // Load services from Supabase
   useEffect(() => {
     const loadServices = async () => {
       try {
-        const snapshot = await get(ref(db, DB_PATHS.SERVICES));
+        const { data, error } = await supabase
+          .from(DB_PATHS.SERVICES)
+          .select('*');
 
         // Bắt đầu với MOCK data
         const mergedServices = new Map<string, ServiceCatalogItem>();
@@ -206,25 +513,54 @@ export const TechnicianView: React.FC = () => {
           mergedServices.set(svc.id, { ...svc });
         });
 
-        // Merge với data từ Firebase (ưu tiên Firebase nếu trùng ID)
-        if (snapshot.exists()) {
-          const data = snapshot.val();
-          Object.keys(data).forEach(key => {
-            const svc = data[key];
-            const serviceId = svc.id || key;
+        // Merge với data từ Supabase (ưu tiên Supabase nếu trùng ID)
+        if (!error && data) {
+          data.forEach(svc => {
+            const serviceId = svc.id || svc.ma_dich_vu || '';
+            
+            // Parse workflows từ cac_buoc_quy_trinh JSONB hoặc từ workflows array
+            let workflowsArray: { id: string; order: number }[] = [];
+            if (svc.workflows && Array.isArray(svc.workflows)) {
+              workflowsArray = svc.workflows;
+            } else if (svc.cac_buoc_quy_trinh && Array.isArray(svc.cac_buoc_quy_trinh)) {
+              // Nếu có cac_buoc_quy_trinh, map thành workflows
+              workflowsArray = svc.cac_buoc_quy_trinh.map((wf: any, idx: number) => ({
+                id: wf.id || wf.id_quy_trinh || '',
+                order: wf.order || wf.thu_tu || idx
+              }));
+            } else if (svc.workflowId) {
+              // Fallback to workflowId
+              if (Array.isArray(svc.workflowId)) {
+                workflowsArray = svc.workflowId.map((id: string, idx: number) => ({ id, order: idx }));
+              } else {
+                workflowsArray = [{ id: svc.workflowId, order: 0 }];
+              }
+            }
+
             mergedServices.set(serviceId, {
               id: serviceId,
-              name: svc.name || '',
-              category: svc.category || '',
-              price: svc.price || 0,
-              desc: svc.desc || '',
-              image: svc.image || '',
-              workflows: svc.workflows || (svc.workflowId ? (Array.isArray(svc.workflowId) ? svc.workflowId.map((id: string, idx: number) => ({ id, order: idx })) : [{ id: svc.workflowId, order: 0 }]) : [])
+              name: svc.ten_dich_vu || svc.name || svc.ten || '',
+              category: svc.danh_muc || svc.category || '',
+              price: Number(svc.gia_niem_yet || svc.price || svc.gia || svc.gia_goc || 0),
+              desc: svc.mo_ta || svc.desc || '',
+              image: svc.anh_dich_vu || svc.image || svc.hinh_anh || svc.anh || '',
+              workflowId: svc.id_quy_trinh || svc.workflowId || '',
+              workflows: workflowsArray
             } as ServiceCatalogItem);
           });
         }
 
-        setServices(Array.from(mergedServices.values()));
+        const servicesList = Array.from(mergedServices.values());
+        console.log('🔧 TechnicianView - Services loaded:', {
+          count: servicesList.length,
+          services: servicesList.map(s => ({
+            id: s.id,
+            name: s.name,
+            workflowsCount: s.workflows?.length || 0,
+            workflows: s.workflows
+          }))
+        });
+        setServices(servicesList);
       } catch (error) {
         console.error('Error loading services:', error);
         setServices(SERVICE_CATALOG);
@@ -234,42 +570,75 @@ export const TechnicianView: React.FC = () => {
     loadServices();
 
     // Listen for real-time updates
-    const servicesRef = ref(db, DB_PATHS.SERVICES);
-    const unsubscribe = onValue(servicesRef, (snapshot) => {
-      try {
-        const mergedServices = new Map<string, ServiceCatalogItem>();
-
-        // Thêm tất cả MOCK services trước
-        SERVICE_CATALOG.forEach(svc => {
-          mergedServices.set(svc.id, { ...svc });
-        });
-
-        // Merge với data từ Firebase
-        if (snapshot.exists()) {
-          const data = snapshot.val();
-          Object.keys(data).forEach(key => {
-            const svc = data[key];
-            const serviceId = svc.id || key;
-            mergedServices.set(serviceId, {
-              id: serviceId,
-              name: svc.name || '',
-              category: svc.category || '',
-              price: svc.price || 0,
-              desc: svc.desc || '',
-              image: svc.image || '',
-              workflows: svc.workflows || (svc.workflowId ? (Array.isArray(svc.workflowId) ? svc.workflowId.map((id: string, idx: number) => ({ id, order: idx })) : [{ id: svc.workflowId, order: 0 }]) : [])
-            } as ServiceCatalogItem);
-          });
+    const channel = supabase
+      .channel('services-changes')
+      .on(
+        'postgres_changes',
+        {
+          event: '*',
+          schema: 'public',
+          table: DB_PATHS.SERVICES,
+        },
+        async () => {
+          // Reload services on change
+          const { data } = await supabase.from(DB_PATHS.SERVICES).select('*');
+          if (data) {
+            const mergedServices = new Map<string, ServiceCatalogItem>();
+            SERVICE_CATALOG.forEach(svc => {
+              mergedServices.set(svc.id, { ...svc });
+            });
+            data.forEach(svc => {
+              const serviceId = svc.id || svc.ma_dich_vu || '';
+              
+              // Parse workflows từ cac_buoc_quy_trinh JSONB hoặc từ workflows array
+              let workflowsArray: { id: string; order: number }[] = [];
+              if (svc.workflows && Array.isArray(svc.workflows)) {
+                workflowsArray = svc.workflows;
+              } else if (svc.cac_buoc_quy_trinh && Array.isArray(svc.cac_buoc_quy_trinh)) {
+                // Nếu có cac_buoc_quy_trinh, map thành workflows
+                workflowsArray = svc.cac_buoc_quy_trinh.map((wf: any, idx: number) => ({
+                  id: wf.id || wf.id_quy_trinh || '',
+                  order: wf.order || wf.thu_tu || idx
+                }));
+              } else if (svc.workflowId) {
+                // Fallback to workflowId
+                if (Array.isArray(svc.workflowId)) {
+                  workflowsArray = svc.workflowId.map((id: string, idx: number) => ({ id, order: idx }));
+                } else {
+                  workflowsArray = [{ id: svc.workflowId, order: 0 }];
+                }
+              }
+              
+              mergedServices.set(serviceId, {
+                id: serviceId,
+                name: svc.ten_dich_vu || svc.name || svc.ten || '',
+                category: svc.danh_muc || svc.category || '',
+                price: Number(svc.gia_niem_yet || svc.price || svc.gia || svc.gia_goc || 0),
+                desc: svc.mo_ta || svc.desc || '',
+                image: svc.anh_dich_vu || svc.image || svc.hinh_anh || svc.anh || '',
+                workflowId: svc.id_quy_trinh || svc.workflowId || '',
+                workflows: workflowsArray
+              } as ServiceCatalogItem);
+            });
+            const servicesList = Array.from(mergedServices.values());
+            console.log('🔧 TechnicianView - Services reloaded:', {
+              count: servicesList.length,
+              services: servicesList.map(s => ({
+                id: s.id,
+                name: s.name,
+                workflowsCount: s.workflows?.length || 0,
+                workflows: s.workflows
+              }))
+            });
+            setServices(servicesList);
+          }
         }
+      )
+      .subscribe();
 
-        setServices(Array.from(mergedServices.values()));
-      } catch (error) {
-        console.error('Error in real-time listener:', error);
-        setServices(SERVICE_CATALOG);
-      }
-    });
-
-    return () => unsubscribe();
+    return () => {
+      supabase.removeChannel(channel);
+    };
   }, []);
 
   // Flatten orders to tasks assigned to me (Simulated logic: In a real app, we filter by assignee. Here we show all active items)
@@ -354,43 +723,145 @@ export const TechnicianView: React.FC = () => {
     return filtered;
   }, [myTasks, filterStatus]);
 
-  const activeTask = useMemo(() =>
-    myTasks.find(t => t.id === activeTaskId) || myTasks[0] || null
-    , [myTasks, activeTaskId]);
+  const activeTask = useMemo(() => {
+    const task = myTasks.find(t => t.id === activeTaskId) || myTasks[0] || null;
+    if (task) {
+      console.log('📌 Active task updated:', {
+        taskId: task.id,
+        taskName: task.name,
+        taskStatus: task.status,
+        myTasksCount: myTasks.length
+      });
+    }
+    return task;
+  }, [myTasks, activeTaskId]);
 
   // Get workflow stages for active task
   const workflowStages = useMemo(() => {
     if (!activeTask) {
-      console.log('No active task');
+      console.log('⚠️ TechnicianView: No active task');
       return null;
     }
 
+    console.log('🔍 TechnicianView: Getting workflow stages for task:', {
+      taskId: activeTask.id,
+      taskName: activeTask.name,
+      serviceId: activeTask.serviceId,
+      taskStatus: activeTask.status,
+      workflowsCount: workflows.length,
+      servicesCount: services.length,
+      availableServiceIds: services.map(s => s.id).slice(0, 10)
+    });
+
     const stages = getWorkflowStages(activeTask.serviceId, workflows, services);
-    console.log('Workflow stages for task:', {
+    
+    // Merge todos từ workflows state vào stages
+    if (stages && workflows.length > 0) {
+      console.log('🔍 Looking for workflow with stages:', {
+        stagesCount: stages.length,
+        stageIds: stages.map(s => s.id),
+        workflowsCount: workflows.length,
+        workflows: workflows.map(w => ({
+          id: w.id,
+          label: w.label,
+          stagesCount: w.stages?.length || 0,
+          stageIds: w.stages?.map(s => s.id) || []
+        }))
+      });
+      
+      // Tìm workflow chứa các stages này - kiểm tra bằng workflowId từ activeTask
+      let workflow = null;
+      
+      // Thử tìm workflow bằng workflowId từ activeTask
+      if (activeTask.workflowId) {
+        workflow = workflows.find(w => w.id === activeTask.workflowId);
+        console.log('🔍 Looking for workflow by activeTask.workflowId:', {
+          workflowId: activeTask.workflowId,
+          found: !!workflow,
+          workflowLabel: workflow?.label
+        });
+      }
+      
+      // Nếu không tìm thấy, thử tìm bằng cách match stage IDs
+      if (!workflow) {
+        workflow = workflows.find(w => w.stages?.some(s => stages.some(st => st.id === s.id)));
+        console.log('🔍 Looking for workflow by stage IDs:', {
+          found: !!workflow,
+          workflowLabel: workflow?.label
+        });
+      }
+      
+      if (workflow && workflow.stages) {
+        console.log('✅ Found workflow:', {
+          workflowId: workflow.id,
+          workflowLabel: workflow.label,
+          stagesCount: workflow.stages.length,
+          stagesWithTodos: workflow.stages.filter(s => s.todos && s.todos.length > 0).length
+        });
+        
+        stages.forEach((stage, idx) => {
+          // Tìm stage tương ứng trong workflow state (có todos từ database)
+          const wfStage = workflow.stages?.find(s => s.id === stage.id);
+          
+          if (wfStage) {
+            if (wfStage.todos && wfStage.todos.length > 0) {
+              // Merge todos từ workflow state vào stage
+              stage.todos = wfStage.todos;
+              console.log(`✅ Merged ${wfStage.todos.length} todos into stage "${stage.name}" (${stage.id}):`, wfStage.todos.map((t: any) => ({ id: t.id, title: t.title })));
+            } else {
+              console.warn(`⚠️ Stage ${idx + 1} "${stage.name}" (${stage.id}) found in workflow but has NO todos`);
+            }
+          } else {
+            console.warn(`⚠️ Stage ${idx + 1} "${stage.name}" (${stage.id}) NOT found in workflow stages`);
+          }
+        });
+      } else {
+        console.warn('⚠️ No workflow found containing these stages:', {
+          activeTaskWorkflowId: activeTask.workflowId,
+          availableWorkflowIds: workflows.map(w => w.id),
+          stageIds: stages.map(s => s.id)
+        });
+      }
+    }
+    
+    console.log('✅ TechnicianView: Final workflow stages with todos:', {
       serviceId: activeTask.serviceId,
       taskStatus: activeTask.status,
       stagesFound: stages ? stages.length : 0,
-      stages: stages?.map(s => ({ id: s.id, name: s.name, order: s.order }))
+      stages: stages?.map(s => ({ 
+        id: s.id, 
+        name: s.name, 
+        order: s.order,
+        hasTodos: !!s.todos,
+        todosCount: s.todos?.length || 0,
+        todos: s.todos?.map((t: any) => ({ id: t.id, title: t.title, completed: t.completed }))
+      }))
     });
 
     return stages;
   }, [activeTask, workflows, services]);
 
   // Map current status to stage ID - try direct match first, then fallback to mapping
+  // LUÔN trả về bước đầu tiên nếu không tìm thấy match
   const currentStageId = useMemo(() => {
-    if (!activeTask || !workflowStages) return null;
+    if (!activeTask || !workflowStages || workflowStages.length === 0) {
+      // Nếu không có workflow stages, trả về null để currentStepIndex = 0
+      return null;
+    }
 
     // Debug log
     console.log('Finding current stage:', {
       taskStatus: activeTask.status,
       workflowStageIds: workflowStages.map(s => s.id),
-      workflowStageNames: workflowStages.map(s => s.name)
+      workflowStageNames: workflowStages.map(s => s.name),
+      firstStageId: workflowStages[0]?.id,
+      firstStageName: workflowStages[0]?.name
     });
 
     // First, try to find exact match in workflow stages
     const exactMatch = workflowStages.find(stage => stage.id === activeTask.status);
     if (exactMatch) {
-      console.log('Found exact match:', exactMatch.id);
+      console.log('✅ Found exact match:', exactMatch.id);
       return exactMatch.id;
     }
 
@@ -398,7 +869,7 @@ export const TechnicianView: React.FC = () => {
     const mappedId = mapStatusToStageId(activeTask.status);
     const mappedMatch = workflowStages.find(stage => stage.id === mappedId);
     if (mappedMatch) {
-      console.log('Found mapped match:', mappedMatch.id);
+      console.log('✅ Found mapped match:', mappedMatch.id);
       return mappedMatch.id;
     }
 
@@ -408,18 +879,38 @@ export const TechnicianView: React.FC = () => {
       stage.name.toLowerCase() === activeTask.status.toLowerCase()
     );
     if (caseInsensitiveMatch) {
-      console.log('Found case-insensitive match:', caseInsensitiveMatch.id);
+      console.log('✅ Found case-insensitive match:', caseInsensitiveMatch.id);
       return caseInsensitiveMatch.id;
     }
 
-    console.warn('No stage match found for status:', activeTask.status);
-    return null;
+    // KHÔNG TÌM THẤY MATCH - LUÔN trả về bước đầu tiên
+    console.log('⚠️ No stage match found for status, defaulting to first stage:', {
+      taskStatus: activeTask.status,
+      firstStageId: workflowStages[0]?.id,
+      firstStageName: workflowStages[0]?.name
+    });
+    return workflowStages[0]?.id || null;
   }, [activeTask, workflowStages]);
 
-  // Find current step index
+  // Find current step index - LUÔN trả về 0 (bước đầu tiên) nếu không tìm thấy
   const currentStepIndex = useMemo(() => {
-    if (!workflowStages || !currentStageId) return -1;
-    return workflowStages.findIndex(stage => stage.id === currentStageId);
+    if (!workflowStages || workflowStages.length === 0) return -1;
+    
+    // Nếu có currentStageId, tìm index của nó
+    if (currentStageId) {
+      const index = workflowStages.findIndex(stage => stage.id === currentStageId);
+      if (index >= 0) {
+        return index;
+      }
+    }
+    
+    // Nếu không tìm thấy hoặc không có currentStageId, LUÔN trả về 0 (bước đầu tiên)
+    console.log('✅ Defaulting to first step (index 0):', {
+      currentStageId,
+      firstStageId: workflowStages[0]?.id,
+      firstStageName: workflowStages[0]?.name
+    });
+    return 0;
   }, [workflowStages, currentStageId]);
 
   // Filter technical logs to show only current stage and previous stages
@@ -451,40 +942,189 @@ export const TechnicianView: React.FC = () => {
     setNoteInput('');
   };
 
+  // Handle todo toggle
+  const handleTodoToggle = async (todoId: string, stageId: string, completed: boolean) => {
+    try {
+      console.log('🔄 Toggling todo:', { todoId, stageId, completed });
+      
+      // Update todo in database
+      const { error } = await supabase
+        .from(DB_PATHS.WORKFLOW_TASKS)
+        .update({ da_hoan_thanh: completed })
+        .eq('id', todoId);
+
+      if (error) {
+        console.error('Error updating todo:', error);
+        alert('Lỗi khi cập nhật task. Vui lòng thử lại.');
+        return;
+      }
+
+      // Reload workflows to reflect changes
+      const loadWorkflows = async () => {
+        try {
+          const { data: workflowsData, error: workflowsError } = await supabase
+            .from(DB_PATHS.WORKFLOWS)
+            .select('id, ten_quy_trinh, mo_ta, phong_ban_phu_trach, loai_ap_dung, vat_tu_can_thiet, nhan_vien_duoc_giao')
+            .order('ngay_tao', { ascending: false })
+            .limit(100);
+
+          if (workflowsError) throw workflowsError;
+
+          const { data: stagesData, error: stagesError } = await supabase
+            .from(DB_PATHS.WORKFLOW_STAGES)
+            .select('id, id_quy_trinh, ten_buoc, thu_tu, chi_tiet, tieu_chuan, nhan_vien_duoc_giao')
+            .order('id_quy_trinh, thu_tu', { ascending: true });
+
+          if (stagesError) throw stagesError;
+
+          const stageIds = (stagesData || []).map((s: any) => s.id);
+          let tasksData: any[] = [];
+
+          if (stageIds.length > 0) {
+            const { data: tasks, error: tasksError } = await supabase
+              .from(DB_PATHS.WORKFLOW_TASKS)
+              .select('*')
+              .in('id_buoc_quy_trinh', stageIds)
+              .order('thu_tu', { ascending: true });
+
+            if (!tasksError && tasks) {
+              tasksData = tasks;
+            }
+          }
+
+          const tasksByStage = tasksData.reduce((acc: any, task: any) => {
+            if (!acc[task.id_buoc_quy_trinh]) {
+              acc[task.id_buoc_quy_trinh] = [];
+            }
+            acc[task.id_buoc_quy_trinh].push({
+              id: task.id,
+              title: task.ten_task,
+              description: task.mo_ta || undefined,
+              completed: task.da_hoan_thanh || false,
+              order: task.thu_tu || 0
+            });
+            return acc;
+          }, {});
+
+          const stagesByWorkflow = new Map<string, any[]>();
+          (stagesData || []).forEach((stage: any) => {
+            if (!stagesByWorkflow.has(stage.id_quy_trinh)) {
+              stagesByWorkflow.set(stage.id_quy_trinh, []);
+            }
+            stagesByWorkflow.get(stage.id_quy_trinh)!.push({
+              id: stage.id,
+              name: stage.ten_buoc,
+              order: stage.thu_tu,
+              details: stage.chi_tiet || undefined,
+              standards: stage.tieu_chuan || undefined,
+              todos: tasksByStage[stage.id] || undefined
+            });
+          });
+
+          const workflowsList: WorkflowDefinition[] = (workflowsData || []).map((wf: any) => ({
+            id: wf.id,
+            label: wf.ten_quy_trinh || '',
+            description: wf.mo_ta || '',
+            department: wf.phong_ban_phu_trach || 'Kỹ Thuật',
+            types: wf.loai_ap_dung || [],
+            materials: wf.vat_tu_can_thiet || undefined,
+            stages: stagesByWorkflow.get(wf.id) || undefined,
+            assignedMembers: wf.nhan_vien_duoc_giao || undefined
+          } as WorkflowDefinition));
+
+          setWorkflows(workflowsList);
+          console.log('✅ Workflows reloaded after todo toggle');
+        } catch (error) {
+          console.error('Error reloading workflows:', error);
+        }
+      };
+
+      await loadWorkflows();
+    } catch (error) {
+      console.error('Error in handleTodoToggle:', error);
+      alert('Lỗi khi cập nhật task. Vui lòng thử lại.');
+    }
+  };
+
   const handleCompleteStep = async () => {
+    console.log('🔄 handleCompleteStep called:', {
+      activeTask: !!activeTask,
+      workflowStages: !!workflowStages,
+      workflowStagesLength: workflowStages?.length || 0,
+      currentStepIndex
+    });
+    
     if (!activeTask || !workflowStages || currentStepIndex < 0) {
+      console.error('❌ Cannot complete step:', {
+        activeTask: !!activeTask,
+        workflowStages: !!workflowStages,
+        currentStepIndex
+      });
       alert('Không thể hoàn thành bước này. Vui lòng kiểm tra lại trạng thái hiện tại.');
       return;
     }
 
     try {
       const nextStepIndex = currentStepIndex + 1;
+      const currentStage = workflowStages[currentStepIndex];
+      
+      console.log('✅ Moving to next step:', {
+        currentStepIndex,
+        currentStageId: currentStage.id,
+        currentStageName: currentStage.name,
+        nextStepIndex,
+        totalStages: workflowStages.length
+      });
+      
       if (nextStepIndex < workflowStages.length) {
         // Move to next stage in current workflow
         const nextStage = workflowStages[nextStepIndex];
-        const currentStage = workflowStages[currentStepIndex];
-        await updateOrderItemStatus(activeTask.orderId, activeTask.id, nextStage.id, CURRENT_USER.name, "Hoàn thành bước " + currentStage.name);
+        console.log('➡️ Moving to next stage:', {
+          nextStageId: nextStage.id,
+          nextStageName: nextStage.name
+        });
+        
+        try {
+          await updateOrderItemStatus(activeTask.orderId, activeTask.id, nextStage.id, CURRENT_USER.name, "Hoàn thành bước " + currentStage.name);
+          console.log('✅ Status updated successfully to:', nextStage.id);
+          
+          // Note: The orders state will be updated by updateOrderItemStatus
+          // which updates local state immediately. activeTask will be recalculated
+          // from myTasks useMemo, which depends on orders, so it should update automatically.
+          // But we can force a re-render to ensure UI updates
+          console.log('⏳ Waiting for state to update...');
+          
+          // Give React time to process the state update from context
+          setTimeout(() => {
+            console.log('🔄 State should be updated. UI will re-render automatically.');
+          }, 300);
+          
+        } catch (error: any) {
+          console.error('❌ Error updating status:', error);
+          alert('Lỗi khi cập nhật trạng thái: ' + (error?.message || String(error)));
+          return;
+        }
       } else {
         // Final step - check if there's a next workflow
         const lastStage = workflowStages[workflowStages.length - 1];
-        
+
         // Check for next workflow
         if (activeTask.serviceId && activeTask.workflowId) {
           const service = services.find(s => s.id === activeTask.serviceId);
           if (service && service.workflows && Array.isArray(service.workflows) && service.workflows.length > 0) {
             // Find current workflow index
             const currentWfIndex = service.workflows.findIndex(wf => wf.id === activeTask.workflowId);
-            
+
             if (currentWfIndex !== -1 && currentWfIndex < service.workflows.length - 1) {
               // There's a next workflow - move to it
               const nextWfConfig = service.workflows[currentWfIndex + 1];
               const nextWf = workflows.find(w => w.id === nextWfConfig.id);
-              
+
               if (nextWf && nextWf.stages && nextWf.stages.length > 0) {
                 // Find first stage of next workflow
                 const sortedStages = [...nextWf.stages].sort((a, b) => a.order - b.order);
                 const firstStage = sortedStages[0];
-                
+
                 // Update order with new workflow
                 const order = orders.find(o => o.id === activeTask.orderId);
                 if (order) {
@@ -551,7 +1191,7 @@ export const TechnicianView: React.FC = () => {
             }
           }
         }
-        
+
         // No next workflow - mark as done
         await updateOrderItemStatus(activeTask.orderId, activeTask.id, lastStage.id, CURRENT_USER.name, "Hoàn thành quy trình");
       }
@@ -564,7 +1204,7 @@ export const TechnicianView: React.FC = () => {
   const handleDeleteTask = async () => {
     if (!activeTask) return;
 
-    if (window.confirm(`Bạn có chắc chắn muốn xóa "${activeTask.name}" khỏi đơn hàng?\n\nHành động này sẽ xóa item này khỏi đơn hàng ${activeTask.orderCode}.`)) {
+    if (window.confirm(`Bạn có chắc chắn muốn xóa "${activeTask.name}" khỏi đơn hàng?\n\nHành động này sẽ xóa item này khỏi đơn hàng.`)) {
       try {
         await deleteOrderItem(activeTask.orderId, activeTask.id);
         setActiveTaskId(null);
@@ -696,10 +1336,9 @@ export const TechnicianView: React.FC = () => {
                 >
                   <div className="flex justify-between mb-1">
                     <span className={`font-medium line-clamp-1 ${(activeTask?.id === task.id) ? 'text-gold-400' : 'text-slate-300'}`}>{task.name}</span>
-                    <span className="text-xs font-mono text-slate-500 ml-2">#{task.id}</span>
                   </div>
                   <div className="flex justify-between items-center text-sm text-slate-500 mt-2">
-                    <span className="text-xs bg-neutral-800 px-2 py-0.5 rounded border border-neutral-700">{task.status}</span>
+                    {/* Bỏ hiển thị status ID (UUID) - chỉ hiển thị expected delivery */}
                     <span className="text-xs flex items-center gap-1">
                       <Clock size={10} /> {task.expectedDelivery}
                     </span>
@@ -718,7 +1357,6 @@ export const TechnicianView: React.FC = () => {
                 <div className="flex-1">
                   <h2 className="text-xl font-bold text-slate-100">{activeTask.name}</h2>
                   <div className="flex items-center gap-3 mt-2">
-                    <span className="text-slate-500 text-sm bg-neutral-800 px-2 py-1 rounded">Đơn: {activeTask.orderCode}</span>
                     <span className="text-slate-500 text-sm bg-neutral-800 px-2 py-1 rounded">Khách: {activeTask.customerName}</span>
                   </div>
                   {activeTask.orderNotes && (
@@ -749,18 +1387,71 @@ export const TechnicianView: React.FC = () => {
                     <h3 className="font-semibold text-slate-300 mb-4 px-1 flex items-center gap-2">
                       <Filter size={16} className="text-gold-500" /> Quy Trình Xử Lý
                     </h3>
+                    
+                    {/* Nhân sự phụ trách */}
+                    {(() => {
+                      const activeWorkflow = workflows.find(w => w.id === activeTask.workflowId);
+                      if (activeWorkflow && activeWorkflow.assignedMembers && activeWorkflow.assignedMembers.length > 0) {
+                        return (
+                          <div className="mb-4 px-3 py-2 bg-neutral-800/30 rounded-lg border border-neutral-700/30">
+                            <div className="text-[10px] text-slate-400/70 uppercase tracking-wider font-medium mb-2 flex items-center gap-1">
+                              <User size={10} />
+                              Nhân sự phụ trách
+                            </div>
+                            <div className="flex flex-wrap gap-1.5">
+                              {activeWorkflow.assignedMembers.map(memberId => {
+                                const member = members.find(m => m.id === memberId);
+                                if (!member) return null;
+                                return (
+                                  <div
+                                    key={memberId}
+                                    className="flex items-center gap-1.5 px-2 py-1 bg-neutral-700/50 rounded border border-neutral-600/30"
+                                  >
+                                    {member.avatar ? (
+                                      <img src={member.avatar} alt="" className="w-4 h-4 rounded-full" />
+                                    ) : (
+                                      <div className="w-4 h-4 rounded-full bg-neutral-600 flex items-center justify-center text-[8px] font-bold text-slate-300">
+                                        {member.name.charAt(0).toUpperCase()}
+                                      </div>
+                                    )}
+                                    <span className="text-[10px] text-slate-300 font-medium">{member.name}</span>
+                                  </div>
+                                );
+                              })}
+                            </div>
+                          </div>
+                        );
+                      }
+                      return null;
+                    })()}
+                    
                     <div className="space-y-3 relative">
                       <div className="absolute left-[19px] top-4 bottom-4 w-0.5 bg-neutral-800 -z-10"></div>
                       {workflowStages ? (
-                        workflowStages.map((stage, idx) => (
-                          <WorkflowStep
-                            key={stage.id}
-                            title={stage.name}
-                            status={stage.id}
-                            index={idx}
-                            currentIndex={currentStepIndex}
-                          />
-                        ))
+                        workflowStages.map((stage, idx) => {
+                          const stageTodos = stage.todos || [];
+                          console.log(`🔍 Rendering WorkflowStep ${idx + 1}:`, {
+                            stageId: stage.id,
+                            stageName: stage.name,
+                            hasTodos: !!stage.todos,
+                            todosCount: stageTodos.length,
+                            todos: stageTodos.map((t: any) => ({ id: t.id, title: t.title, completed: t.completed }))
+                          });
+                          
+                          return (
+                            <WorkflowStep
+                              key={stage.id}
+                              title={stage.name}
+                              status={stage.id}
+                              index={idx}
+                              currentIndex={currentStepIndex}
+                              todos={stageTodos.length > 0 ? stageTodos : undefined}
+                              onTodoToggle={handleTodoToggle}
+                              assignedMembers={stage.assignedMembers}
+                              members={members}
+                            />
+                          );
+                        })
                       ) : (
                         <div className="text-center py-4 text-slate-500 text-sm">
                           Không tìm thấy quy trình cho dịch vụ này
@@ -770,19 +1461,37 @@ export const TechnicianView: React.FC = () => {
                   </div>
 
                   <div className="pt-4 border-t border-neutral-800">
-                    <button
-                      onClick={handleCompleteStep}
-                      disabled={!activeTask || !workflowStages || currentStepIndex < 0 || currentStepIndex >= (workflowStages?.length || 0)}
-                      className="w-full bg-emerald-700 hover:bg-emerald-600 disabled:bg-neutral-800 disabled:text-slate-500 disabled:cursor-not-allowed text-white py-3 rounded-lg font-bold transition-colors shadow-lg shadow-emerald-900/20 flex items-center justify-center gap-2"
-                    >
-                      <CheckCircle2 size={20} />
-                      {currentStepIndex >= (workflowStages?.length || 0) - 1 ? 'Hoàn Thành Quy Trình' : 'Hoàn Thành Bước Này'}
-                    </button>
-                    {(!activeTask || !workflowStages || currentStepIndex < 0) && (
-                      <p className="text-xs text-slate-500 mt-2 text-center">
-                        {!activeTask ? 'Chưa chọn công việc' : !workflowStages ? 'Không tìm thấy quy trình' : 'Không xác định được bước hiện tại'}
-                      </p>
-                    )}
+                    {(() => {
+                      const isDisabled = !activeTask || !workflowStages || currentStepIndex < 0 || !workflowStages || workflowStages.length === 0;
+                      const isLastStep = currentStepIndex >= (workflowStages?.length || 0) - 1;
+                      
+                      console.log('🔘 Button state:', {
+                        activeTask: !!activeTask,
+                        workflowStages: !!workflowStages,
+                        workflowStagesLength: workflowStages?.length || 0,
+                        currentStepIndex,
+                        isDisabled,
+                        isLastStep
+                      });
+                      
+                      return (
+                        <>
+                          <button
+                            onClick={handleCompleteStep}
+                            disabled={isDisabled}
+                            className="w-full bg-emerald-700 hover:bg-emerald-600 disabled:bg-neutral-800 disabled:text-slate-500 disabled:cursor-not-allowed text-white py-3 rounded-lg font-bold transition-colors shadow-lg shadow-emerald-900/20 flex items-center justify-center gap-2"
+                          >
+                            <CheckCircle2 size={20} />
+                            {isLastStep ? 'Hoàn Thành Quy Trình' : 'Hoàn Thành Bước Này'}
+                          </button>
+                          {isDisabled && (
+                            <p className="text-xs text-slate-500 mt-2 text-center">
+                              {!activeTask ? 'Chưa chọn công việc' : !workflowStages ? 'Không tìm thấy quy trình' : currentStepIndex < 0 ? 'Không xác định được bước hiện tại' : 'Không có bước nào trong quy trình'}
+                            </p>
+                          )}
+                        </>
+                      );
+                    })()}
                   </div>
                 </div>
 

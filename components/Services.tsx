@@ -3,8 +3,7 @@ import { createPortal } from 'react-dom';
 import { Search, Plus, Filter, MoreHorizontal, Layers, Briefcase, Tag, Eye, Edit, Trash2, ArrowUp, ArrowDown, GripVertical, ChevronRight, ChevronDown, FolderOpen, Folder } from 'lucide-react';
 import { SERVICE_CATALOG, MOCK_WORKFLOWS } from '../constants';
 import { TableFilter, FilterState } from './TableFilter';
-import { ref, set, remove, get, onValue } from 'firebase/database';
-import { db, DB_PATHS } from '../firebase';
+import { supabase, DB_TABLES } from '../supabase';
 import { ServiceCatalogItem, WorkflowDefinition, ServiceCategory } from '../types';
 
 // Define 4-level category structure
@@ -93,8 +92,10 @@ const CategorySidebar: React.FC<{
   onSelectCategory: (categoryId: string | null) => void;
   onEditCategory?: (category: ServiceCategory) => void;
   onDeleteCategory?: (category: ServiceCategory) => void;
-}> = ({ categories, selectedCategory, onSelectCategory, onEditCategory, onDeleteCategory }) => {
-  // Auto-expand all level 1 categories
+  categoryFilter?: string;
+  onCategoryFilterChange?: (filter: string) => void;
+  categoryOptions?: string[];
+}> = ({ categories, selectedCategory, onSelectCategory, onEditCategory, onDeleteCategory, categoryFilter, onCategoryFilterChange, categoryOptions }) => {
   const [expandedNodes, setExpandedNodes] = useState<Set<string>>(() => {
     const initial = new Set<string>();
     categories.forEach(cat => {
@@ -103,7 +104,6 @@ const CategorySidebar: React.FC<{
     return initial;
   });
 
-  // Update expanded nodes when categories change (only add new level 1 categories)
   useEffect(() => {
     setExpandedNodes(prev => {
       const newExpanded = new Set(prev);
@@ -117,27 +117,31 @@ const CategorySidebar: React.FC<{
   }, [categories.map(c => c.id).join(',')]);
 
   const toggleNode = (nodeId: string) => {
-    const newExpanded = new Set(expandedNodes);
-    if (newExpanded.has(nodeId)) {
-      newExpanded.delete(nodeId);
-    } else {
-      newExpanded.add(nodeId);
-    }
-    setExpandedNodes(newExpanded);
+    setExpandedNodes(prev => {
+      const newExpanded = new Set(prev);
+      if (newExpanded.has(nodeId)) {
+        newExpanded.delete(nodeId);
+      } else {
+        newExpanded.add(nodeId);
+      }
+      return newExpanded;
+    });
   };
 
   const renderCategory = (category: ServiceCategory, depth: number = 0) => {
     const isExpanded = expandedNodes.has(category.id);
     const isSelected = selectedCategory === category.id;
     const hasChildren = category.children && category.children.length > 0;
-
-    const paddingLeft = depth * 16 + 8;
+    const paddingLeft = depth * 20 + 8;
 
     return (
       <div key={category.id}>
         <div
-          className={`group flex items-center gap-2 px-2 py-2 rounded-lg cursor-pointer transition-all hover:bg-neutral-800 ${isSelected ? 'bg-gold-900/20 text-gold-400 border-l-2 border-gold-500' : 'text-slate-300'
-            }`}
+          className={`group flex items-center gap-2 px-2 py-2 rounded-lg cursor-pointer transition-all hover:bg-neutral-800 ${
+            isSelected 
+              ? 'bg-gold-900/20 text-gold-400 border-l-2 border-gold-500' 
+              : 'text-slate-300'
+          }`}
           style={{ paddingLeft: `${paddingLeft}px` }}
           onClick={() => onSelectCategory(isSelected ? null : category.id)}
         >
@@ -147,26 +151,34 @@ const CategorySidebar: React.FC<{
                 e.stopPropagation();
                 toggleNode(category.id);
               }}
-              className="p-0.5 hover:bg-neutral-700 rounded"
+              className="p-0.5 hover:bg-neutral-700 rounded flex-shrink-0"
             >
-              {isExpanded ? <ChevronDown size={14} /> : <ChevronRight size={14} />}
+              {isExpanded ? <ChevronDown size={14} className="text-slate-400" /> : <ChevronRight size={14} className="text-slate-400" />}
             </button>
           )}
-          {!hasChildren && <div className="w-5" />}
+          {!hasChildren && <div className="w-5 flex-shrink-0" />}
 
-          {category.icon && <span className="text-sm">{category.icon}</span>}
+          <span className={`text-xs font-bold px-1.5 py-0.5 rounded flex-shrink-0 ${
+            category.level === 1 ? 'bg-emerald-900/50 text-emerald-400' :
+            category.level === 2 ? 'bg-blue-900/50 text-blue-400' :
+            category.level === 3 ? 'bg-purple-900/50 text-purple-400' :
+            'bg-orange-900/50 text-orange-400'
+          }`}>
+            C{category.level}
+          </span>
 
-          <span className={`text-sm flex-1 ${category.level === 1 ? 'font-bold' : category.level === 2 ? 'font-semibold' : ''} ${category.color || ''}`}>
+          <span className={`flex-1 truncate ${
+            category.level === 1 ? 'font-bold text-base text-emerald-400' :
+            category.level === 2 ? 'font-semibold text-sm text-blue-400' :
+            category.level === 3 ? 'font-medium text-sm text-purple-400' :
+            'text-sm text-orange-400'
+          } ${category.color || ''}`}>
             {category.name}
           </span>
 
-          {category.level === 4 && (
-            <span className="text-xs text-slate-500 bg-neutral-800 px-1.5 py-0.5 rounded">L4</span>
-          )}
-
           {/* Edit and Delete buttons - show on hover */}
           {(onEditCategory || onDeleteCategory) && (
-            <div className="opacity-0 group-hover:opacity-100 transition-opacity flex items-center gap-1">
+            <div className="opacity-0 group-hover:opacity-100 transition-opacity flex items-center gap-1 flex-shrink-0">
               {onEditCategory && (
                 <button
                   onClick={(e) => {
@@ -217,13 +229,31 @@ const CategorySidebar: React.FC<{
 
       <button
         onClick={() => onSelectCategory(null)}
-        className={`w-full mb-3 px-3 py-2 rounded-lg text-sm font-medium transition-all ${selectedCategory === null
-          ? 'bg-gold-600 text-black'
-          : 'bg-neutral-800 text-slate-300 hover:bg-neutral-700'
-          }`}
+        className={`w-full mb-3 px-3 py-2 rounded-lg text-sm font-medium transition-all ${
+          selectedCategory === null
+            ? 'bg-gold-600 text-black'
+            : 'bg-neutral-800 text-slate-300 hover:bg-neutral-700'
+        }`}
       >
         Tất Cả Dịch Vụ
       </button>
+
+      {/* Dropdown filter cho category */}
+      {onCategoryFilterChange && categoryOptions && (
+        <div className="mb-3">
+          <label className="text-xs text-slate-400 mb-1 block">Lọc theo danh mục:</label>
+          <select
+            value={categoryFilter || 'all'}
+            onChange={(e) => onCategoryFilterChange(e.target.value)}
+            className="w-full px-3 py-2 bg-neutral-800 border border-neutral-700 rounded-lg text-slate-300 text-sm focus:ring-1 focus:ring-gold-500 outline-none"
+          >
+            <option value="all">Tất cả danh mục</option>
+            {categoryOptions.filter(c => c !== 'all').map(cat => (
+              <option key={cat} value={cat}>{cat}</option>
+            ))}
+          </select>
+        </div>
+      )}
 
       <div className="space-y-1">
         {categories.map((category) => renderCategory(category, 0))}
@@ -255,64 +285,64 @@ export const Services: React.FC = () => {
   });
   const [categoryPath, setCategoryPath] = useState<string[]>([]);
   const [customLevels, setCustomLevels] = useState<Record<number, boolean>>({});
-  const [dynamicCategories, setDynamicCategories] = useState<ServiceCategory[]>([]);
 
-  // Build dynamic categories from services
-  const buildDynamicCategories = (services: ServiceCatalogItem[]): ServiceCategory[] => {
+  // Build dynamic categories from services - Tối ưu hiệu suất
+  const buildDynamicCategories = (servicesList: ServiceCatalogItem[]): ServiceCategory[] => {
     const categoryMap = new Map<string, ServiceCategory>();
     let customIdCounter = 10000; // Start from high number to avoid conflicts
 
-    services.forEach(service => {
+    servicesList.forEach(service => {
       if (!service.categoryPath || service.categoryPath.length === 0) return;
 
       // Build category tree from path
-      let currentLevel = categoryMap;
       let parentId: string | undefined = undefined;
 
       service.categoryPath.forEach((pathItem, index) => {
-        const level = index + 1;
-        const categoryId = `custom-${customIdCounter++}`;
+        const level = index + 1; // level 1, 2, 3, 4
         
-        // Check if category already exists at this level
-        let category: ServiceCategory | undefined;
-        for (const [id, cat] of categoryMap.entries()) {
-          if (cat.name === pathItem && cat.level === level && cat.parentId === parentId) {
-            category = cat;
-            break;
-          }
-        }
+        // Tối ưu: Tìm category nhanh hơn bằng cách tạo key unique
+        const categoryKey = `${parentId || 'root'}-${level}-${pathItem}`;
+        let category = categoryMap.get(categoryKey);
 
         if (!category) {
+          const categoryId = `custom-${customIdCounter++}`;
           category = {
             id: categoryId,
             name: pathItem,
-            level: level,
+            level: level as 1 | 2 | 3 | 4,
             parentId: parentId,
             children: [],
-            color: level === 1 ? 'text-emerald-400' : undefined
+            color: level === 1 ? 'text-emerald-400' : 
+                   level === 2 ? 'text-blue-400' : 
+                   level === 3 ? 'text-purple-400' : 
+                   'text-orange-400'
           };
-          categoryMap.set(categoryId, category);
+          categoryMap.set(categoryKey, category);
         }
 
         parentId = category.id;
       });
     });
 
-    // Build tree structure
+    // Build tree structure - xây dựng cây phân cấp 4 cấp
     const rootCategories: ServiceCategory[] = [];
     const allCategories = Array.from(categoryMap.values());
 
+    // Thêm tất cả cấp 1 vào root
     allCategories.forEach(cat => {
       if (cat.level === 1) {
-        // Check if root category already exists
         if (!rootCategories.find(c => c.id === cat.id)) {
           rootCategories.push(cat);
         }
-      } else if (cat.parentId) {
+      }
+    });
+
+    // Thêm các cấp con (2, 3, 4) vào parent tương ứng
+    allCategories.forEach(cat => {
+      if (cat.level > 1 && cat.parentId) {
         const parent = allCategories.find(c => c.id === cat.parentId);
         if (parent) {
           if (!parent.children) parent.children = [];
-          // Check if child already exists
           if (!parent.children.find(c => c.id === cat.id)) {
             parent.children.push(cat);
           }
@@ -320,30 +350,26 @@ export const Services: React.FC = () => {
       }
     });
 
+    // Sắp xếp theo tên
+    rootCategories.sort((a, b) => a.name.localeCompare(b.name));
+    const sortChildren = (cats: ServiceCategory[]) => {
+      cats.forEach(cat => {
+        if (cat.children && cat.children.length > 0) {
+          cat.children.sort((a, b) => a.name.localeCompare(b.name));
+          sortChildren(cat.children);
+        }
+      });
+    };
+    sortChildren(rootCategories);
+
     return rootCategories;
   };
 
-  // Merge static and dynamic categories
+  // Build dynamic categories từ services - Tối ưu với useMemo
   const mergedCategories = useMemo(() => {
-    // Check if dynamic categories already exist in static tree
-    const staticCategoryNames = new Set<string>();
-    const collectNames = (cats: ServiceCategory[]) => {
-      cats.forEach(cat => {
-        staticCategoryNames.add(cat.name);
-        if (cat.children) collectNames(cat.children);
-      });
-    };
-    collectNames(CATEGORY_TREE);
-
-    // Only add dynamic categories that don't exist in static tree
-    const newDynamicCategories = dynamicCategories.filter(dynCat => {
-      // Check if a category with same name and level exists in static tree
-      const exists = Array.from(staticCategoryNames).some(name => name === dynCat.name);
-      return !exists;
-    });
-
-    return [...CATEGORY_TREE, ...newDynamicCategories];
-  }, [dynamicCategories]);
+    const categories = buildDynamicCategories(services);
+    return categories;
+  }, [services]);
 
   // Helper tìm path từ tên category
   const findCategoryPathByName = (name: string, nodes: ServiceCategory[]): string[] | null => {
@@ -439,121 +465,120 @@ export const Services: React.FC = () => {
   // No tiers
 
 
-  // Load services from Firebase
-  useEffect(() => {
-    const loadServices = async () => {
-      try {
-        const snapshot = await get(ref(db, DB_PATHS.SERVICES));
+  // Load services from Supabase
+  const loadServices = async () => {
+    try {
+      const { data, error } = await supabase
+        .from(DB_TABLES.SERVICES)
+        .select('id, ten_dich_vu, cap_1, cap_2, cap_3, cap_4, gia_niem_yet, mo_ta, anh_dich_vu, id_quy_trinh, cac_buoc_quy_trinh')
+        .order('ngay_tao', { ascending: false })
+        .limit(50); // Giảm limit để tăng tốc độ tối đa
 
-        const mergedServices = new Map<string, ServiceCatalogItem>();
-
-        // Merge với data từ Firebase (ưu tiên Firebase nếu trùng ID)
-        if (snapshot.exists()) {
-          const data = snapshot.val();
-          Object.keys(data).forEach(key => {
-            const svc = data[key];
-            const serviceId = svc.id || key;
-            const catPath = svc.categoryPath || [];
-            mergedServices.set(serviceId, {
-              id: serviceId,
-              name: svc.name || '',
-              category: svc.category || '',
-              categoryPath: catPath || [],
-              price: svc.price || 0,
-              desc: svc.desc || '',
-              image: svc.image || '',
-              workflowId: svc.workflowId || '',
-              workflows: svc.workflows || undefined
-            } as ServiceCatalogItem);
-          });
-        }
-
-        const servicesList = Array.from(mergedServices.values());
-        setServices(servicesList);
-        
-        // Build dynamic categories from services
-        const dynamicCats = buildDynamicCategories(servicesList);
-        setDynamicCategories(dynamicCats);
-      } catch (error) {
-        console.error('Error loading services:', error);
-        setServices([]);
-        setDynamicCategories([]);
-      } finally {
-        setIsLoading(false);
+      if (error) {
+        console.error('Lỗi khi load services:', error);
+        throw error;
       }
-    };
 
+      // Map từ tên cột tiếng Việt sang interface
+      // Chuyển 4 cột cap_1, cap_2, cap_3, cap_4 thành categoryPath array
+      const servicesList: ServiceCatalogItem[] = (data || []).map((svc: any) => {
+        const categoryPath: string[] = [];
+        if (svc.cap_1) categoryPath.push(svc.cap_1);
+        if (svc.cap_2) categoryPath.push(svc.cap_2);
+        if (svc.cap_3) categoryPath.push(svc.cap_3);
+        if (svc.cap_4) categoryPath.push(svc.cap_4);
+        
+        // Lấy category từ categoryPath (join bằng ' > ') hoặc để trống
+        const category = categoryPath.length > 0 ? categoryPath.join(' > ') : '';
+        
+        const mappedService = {
+          id: svc.id,
+          name: svc.ten_dich_vu || '',
+          category: category,
+          categoryPath: categoryPath,
+          price: svc.gia_niem_yet || 0,
+          desc: svc.mo_ta || '',
+          image: svc.anh_dich_vu || '',
+          workflowId: svc.id_quy_trinh || '',
+          workflows: svc.cac_buoc_quy_trinh || undefined
+        };
+        
+        return mappedService;
+      });
+
+      setServices(servicesList);
+    } catch (error: any) {
+      console.error('Error loading services:', error);
+      console.error('Error details:', {
+        message: error?.message,
+        details: error?.details,
+        hint: error?.hint,
+        code: error?.code
+      });
+      setServices([]);
+    } finally {
+      setIsLoading(false);
+    }
+  };
+
+  useEffect(() => {
     loadServices();
 
-    // Listen for real-time updates
-    const servicesRef = ref(db, DB_PATHS.SERVICES);
-    const unsubscribe = onValue(servicesRef, (snapshot) => {
-      try {
-        const mergedServices = new Map<string, ServiceCatalogItem>();
+    // Delay real-time subscriptions 3 giây để không làm chậm initial load
+    let debounceTimer: NodeJS.Timeout;
+    let channel: any = null;
+    
+    const setupRealtime = () => {
+      channel = supabase
+        .channel('services-changes')
+        .on('postgres_changes', 
+          { event: '*', schema: 'public', table: DB_TABLES.SERVICES },
+          () => {
+            // Debounce: chỉ reload sau 2s không có thay đổi
+            clearTimeout(debounceTimer);
+            debounceTimer = setTimeout(() => {
+              loadServices();
+            }, 2000);
+          }
+        )
+        .subscribe();
+    };
 
-        // Merge với data từ Firebase (ưu tiên Firebase nếu trùng ID)
-        if (snapshot.exists()) {
-          const data = snapshot.val();
-          Object.keys(data).forEach(key => {
-            const svc = data[key];
-            const serviceId = svc.id || key;
-            const catPath = svc.categoryPath || [];
-            mergedServices.set(serviceId, {
-              id: serviceId,
-              name: svc.name || '',
-              category: svc.category || '',
-              categoryPath: catPath || [],
-              price: svc.price || 0,
-              desc: svc.desc || '',
-              image: svc.image || '',
-              workflowId: svc.workflowId || '',
-              workflows: svc.workflows || undefined
-            } as ServiceCatalogItem);
-          });
-        }
+    const realtimeTimeout = setTimeout(setupRealtime, 3000);
 
-        const servicesList = Array.from(mergedServices.values());
-        setServices(servicesList);
-        
-        // Build dynamic categories from services
-        const dynamicCats = buildDynamicCategories(servicesList);
-        setDynamicCategories(dynamicCats);
-      } catch (error) {
-        console.error('Error in real-time listener:', error);
-        setServices([]);
+    return () => {
+      clearTimeout(realtimeTimeout);
+      clearTimeout(debounceTimer);
+      if (channel) {
+        supabase.removeChannel(channel);
       }
-    });
-
-    return () => unsubscribe();
+    };
   }, []);
 
-  // Load workflows from Firebase
+  // Load workflows from Supabase
   useEffect(() => {
     const loadWorkflows = async () => {
       try {
-        const snapshot = await get(ref(db, DB_PATHS.WORKFLOWS));
-        if (snapshot.exists()) {
-          const data = snapshot.val();
-          const workflowsList: WorkflowDefinition[] = Object.keys(data).map(key => {
-            const wf = data[key] as any;
-            return {
-              id: wf.id || key,
-              label: wf.label || '',
-              description: wf.description || '',
-              department: wf.department || 'Kỹ Thuật',
-              types: wf.types || [],
-              color: wf.color || 'bg-blue-900/30 text-blue-400 border-blue-800',
-              materials: wf.materials || undefined,
-              stages: wf.stages || undefined,
-              assignedMembers: wf.assignedMembers || undefined
-            } as WorkflowDefinition;
-          });
-          console.log('Services: Loaded workflows from Firebase:', workflowsList);
-          setWorkflows(workflowsList);
-        } else {
-          console.log('Services: No workflows in Firebase');
-          setWorkflows([]);
-        }
+        const { data, error } = await supabase
+          .from(DB_TABLES.WORKFLOWS)
+          .select('*')
+          .order('ngay_tao', { ascending: false });
+
+        if (error) throw error;
+
+        // Map từ tên cột tiếng Việt sang interface
+        const workflowsList: WorkflowDefinition[] = (data || []).map((wf: any) => ({
+          id: wf.id,
+          label: wf.ten_quy_trinh || '',
+          description: wf.mo_ta || '',
+          department: wf.phong_ban_phu_trach || 'ky_thuat',
+          types: wf.loai_ap_dung || [],
+          materials: wf.vat_tu_can_thiet || undefined,
+          stages: wf.cac_buoc || undefined,
+          assignedMembers: wf.nhan_vien_duoc_giao || undefined
+        }));
+
+        setWorkflows(workflowsList);
       } catch (error) {
         console.error('Error loading workflows:', error);
         setWorkflows([]);
@@ -562,39 +587,34 @@ export const Services: React.FC = () => {
 
     loadWorkflows();
 
-    // Listen for real-time updates
-    const workflowsRef = ref(db, DB_PATHS.WORKFLOWS);
-    const unsubscribe = onValue(workflowsRef, (snapshot) => {
-      try {
-        if (snapshot.exists()) {
-          const data = snapshot.val();
-          const workflowsList: WorkflowDefinition[] = Object.keys(data).map(key => {
-            const wf = data[key] as any;
-            return {
-              id: wf.id || key,
-              label: wf.label || '',
-              description: wf.description || '',
-              department: wf.department || 'Kỹ Thuật',
-              types: wf.types || [],
-              color: wf.color || 'bg-blue-900/30 text-blue-400 border-blue-800',
-              materials: wf.materials || undefined,
-              stages: wf.stages || undefined,
-              assignedMembers: wf.assignedMembers || undefined
-            } as WorkflowDefinition;
-          });
-          console.log('Services: Real-time workflows update:', workflowsList);
-          setWorkflows(workflowsList);
-        } else {
-          console.log('Services: Real-time update - no workflows');
-          setWorkflows([]);
-        }
-      } catch (error) {
-        console.error('Error in real-time listener:', error);
-        setWorkflows([]);
-      }
-    });
+    // Delay real-time subscriptions 3 giây để không làm chậm initial load
+    let debounceTimer: NodeJS.Timeout;
+    let channel: any = null;
+    
+    const setupRealtime = () => {
+      channel = supabase
+        .channel('workflows-changes')
+        .on('postgres_changes', 
+          { event: '*', schema: 'public', table: DB_TABLES.WORKFLOWS },
+          () => {
+            clearTimeout(debounceTimer);
+            debounceTimer = setTimeout(() => {
+              loadWorkflows();
+            }, 2000);
+          }
+        )
+        .subscribe();
+    };
 
-    return () => unsubscribe();
+    const realtimeTimeout = setTimeout(setupRealtime, 3000);
+
+    return () => {
+      clearTimeout(realtimeTimeout);
+      clearTimeout(debounceTimer);
+      if (channel) {
+        supabase.removeChannel(channel);
+      }
+    };
   }, []);
 
   // Lấy danh sách danh mục unique
@@ -609,15 +629,16 @@ export const Services: React.FC = () => {
     return service.categoryPath.includes(categoryId);
   };
 
-  // Lọc dịch vụ theo tìm kiếm, danh mục và cấp độ
+  // Lọc dịch vụ theo tìm kiếm, danh mục và cấp độ - Tối ưu hiệu suất
   const filteredServices = useMemo(() => {
     let result = [...services];
     
+    // Tối ưu: chỉ filter khi có điều kiện
     if (searchText.trim()) {
       const search = searchText.toLowerCase();
       result = result.filter(s => 
         s.name.toLowerCase().includes(search) ||
-        s.desc.toLowerCase().includes(search)
+        (s.desc && s.desc.toLowerCase().includes(search))
       );
     }
     
@@ -626,16 +647,98 @@ export const Services: React.FC = () => {
     }
 
     if (selectedCategory) {
-      result = result.filter(s => {
-        if (!s.categoryPath) return false;
-        return s.categoryPath.includes(selectedCategory);
-      });
+      // Cache category name lookup
+      const findCategoryNameById = (id: string, nodes: ServiceCategory[]): string | null => {
+        for (const node of nodes) {
+          if (node.id === id) return node.name;
+          if (node.children) {
+            const found = findCategoryNameById(id, node.children);
+            if (found) return found;
+          }
+        }
+        return null;
+      };
+      
+      const categoryName = findCategoryNameById(selectedCategory, mergedCategories);
+      
+      if (categoryName) {
+        result = result.filter(s => {
+          if (!s.categoryPath) return false;
+          return s.categoryPath.includes(categoryName);
+        });
+      }
     }
     
     return result;
-  }, [services, searchText, categoryFilter, selectedCategory]);
+  }, [services, searchText, categoryFilter, selectedCategory, mergedCategories]);
 
-  // Group services by tier
+  // Đã bỏ groupedServices - không dùng nữa vì hiển thị flat list
+
+  // Render service row
+  const renderServiceRow = (service: ServiceCatalogItem, index: number) => {
+    let svcWorkflows: Array<{ id: string; order: number }> = [];
+    if (service.workflows && Array.isArray(service.workflows)) {
+      svcWorkflows = service.workflows;
+    } else {
+      const workflowIds = Array.isArray(service.workflowId)
+        ? service.workflowId
+        : [service.workflowId].filter(Boolean);
+      svcWorkflows = workflowIds.map((id, idx) => ({ id, order: idx + 1 }));
+    }
+
+    const sortedWorkflows = svcWorkflows
+      .sort((a, b) => a.order - b.order)
+      .map(w => workflows.find(wf => wf.id === w.id))
+      .filter(Boolean);
+
+    return (
+      <tr key={service.id} className="transition-colors cursor-pointer group hover:bg-neutral-800/50" onClick={() => handleViewService(service)}>
+        <td className="p-2 text-center text-slate-500 text-xs">{index}</td>
+        <td className="p-2">
+          <div className="flex items-center gap-3">
+            <div className="w-10 h-10 rounded-lg border border-neutral-700 overflow-hidden bg-neutral-800 flex-shrink-0">
+              {service.image ? (
+                <img src={service.image} className="w-full h-full object-cover" alt={service.name} />
+              ) : (
+                <div className="w-full h-full flex items-center justify-center text-slate-600"><Briefcase size={16} /></div>
+              )}
+            </div>
+            <div className="min-w-0">
+              <div className="font-semibold text-sm text-slate-200 truncate">{service.name}</div>
+              <div className="text-[10px] text-slate-500 font-mono truncate">#{service.id.slice(0, 8)}...</div>
+            </div>
+          </div>
+        </td>
+        <td className="p-2">
+          <div className="flex flex-wrap gap-1">
+            {sortedWorkflows.length > 0 ? (
+              sortedWorkflows.map((workflow, idx) => {
+                if (!workflow) return null;
+                return (
+                  <span key={workflow.id} className={`px-1.5 py-0.5 rounded text-[10px] font-bold border ${workflow.color}`}>
+                    {workflow.label}
+                  </span>
+                );
+              })
+            ) : (
+              <span className="text-xs text-slate-500 italic">--</span>
+            )}
+          </div>
+        </td>
+        <td className="p-2 text-right font-bold text-gold-400 text-sm">
+          {service.price.toLocaleString()} ₫
+        </td>
+        <td className="p-2 sticky right-0 bg-neutral-900/95 backdrop-blur-sm group-hover:bg-neutral-800 transition-colors z-20">
+          <ActionMenu
+            itemName={service.name}
+            onView={() => handleViewService(service)}
+            onEdit={() => handleEditService(service)}
+            onDelete={() => handleDeleteService(service)}
+          />
+        </td>
+      </tr>
+    );
+  };
 
 
   const handleAddService = async () => {
@@ -645,30 +748,48 @@ export const Services: React.FC = () => {
     }
 
     try {
-      // Tạo ID tự động từ tên dịch vụ
-      const serviceId = `SVC-${Date.now()}-${Math.floor(Math.random() * 1000)}`;
-
-      // Tạo đối tượng dịch vụ
+      // Tạo đối tượng dịch vụ (KHÔNG gửi id - để database tự tạo)
       const serviceData: any = {
-        id: serviceId,
-        name: newService.name,
-        category: newService.category,
-        categoryPath: categoryPath,
-        price: parseInt(newService.price),
-        desc: newService.desc || '',
-        image: newService.image || '',
-        workflows: newService.workflows.sort((a, b) => a.order - b.order)
+        ten_dich_vu: newService.name,
+        gia_niem_yet: parseFloat(newService.price),
+        cac_buoc_quy_trinh: newService.workflows.sort((a, b) => a.order - b.order)
       };
 
-      // Lưu vào Firebase
-      await set(ref(db, `${DB_PATHS.SERVICES}/${serviceId}`), serviceData);
+      // Chỉ thêm optional fields nếu có giá trị
+      // Lưu categoryPath vào 4 cột cap_1, cap_2, cap_3, cap_4
+      if (categoryPath.length > 0) {
+        if (categoryPath[0]) serviceData.cap_1 = categoryPath[0];
+        if (categoryPath[1]) serviceData.cap_2 = categoryPath[1];
+        if (categoryPath[2]) serviceData.cap_3 = categoryPath[2];
+        if (categoryPath[3]) serviceData.cap_4 = categoryPath[3];
+      }
+      if (newService.desc) serviceData.mo_ta = newService.desc;
+      if (newService.image) serviceData.anh_dich_vu = newService.image;
+      if (newService.workflows[0]?.id) serviceData.id_quy_trinh = newService.workflows[0].id;
+
+      console.log('Đang lưu dịch vụ vào Supabase:', serviceData);
+
+      // Lưu vào Supabase (không gửi id - database tự tạo)
+      // Chỉ select id để tối ưu tốc độ
+      const { data, error } = await supabase
+        .from(DB_TABLES.SERVICES)
+        .insert(serviceData)
+        .select('id')
+        .single();
+
+      if (error) {
+        console.error('Lỗi Supabase:', error);
+        throw error;
+      }
+
+      const serviceId = data?.id;
 
       const workflowLabels = newService.workflows
         .sort((a, b) => a.order - b.order)
         .map(w => workflows.find(wf => wf.id === w.id)?.label)
         .filter(Boolean);
 
-      alert(`Thêm dịch vụ thành công!\n\nTên: ${newService.name}\nDanh mục: ${newService.category}\nGiá: ${parseInt(newService.price).toLocaleString()} ₫\nQuy trình: ${workflowLabels.join(' → ')}\n\nĐã lưu vào Firebase!`);
+      alert(`Thêm dịch vụ thành công!\n\nID: ${serviceId}\nTên: ${newService.name}\nDanh mục: ${newService.category}\nGiá: ${parseFloat(newService.price).toLocaleString()} ₫\nQuy trình: ${workflowLabels.join(' → ')}\n\nĐã lưu vào Supabase!`);
 
       setNewService({
         name: '',
@@ -678,13 +799,18 @@ export const Services: React.FC = () => {
         workflows: [],
         image: ''
       });
+      setCategoryPath([]);
       setWorkflowSearch('');
       setShowAddModal(false);
-      // Services will be updated automatically via Firebase listener
+      
+      // Reload services
+      await loadServices();
     } catch (error: any) {
       console.error('Lỗi khi lưu dịch vụ:', error);
-      const errorMessage = error?.message || String(error);
-      alert('Lỗi khi lưu dịch vụ vào Firebase:\n' + errorMessage + '\n\nVui lòng kiểm tra kết nối Firebase và thử lại.');
+      const errorMessage = error?.message || JSON.stringify(error);
+      const errorDetails = error?.details || '';
+      const errorHint = error?.hint || '';
+      alert(`Lỗi khi lưu dịch vụ vào Supabase:\n\n${errorMessage}\n${errorDetails ? `Chi tiết: ${errorDetails}\n` : ''}${errorHint ? `Gợi ý: ${errorHint}` : ''}\n\nVui lòng kiểm tra:\n1. Kết nối Supabase\n2. Bảng ${DB_TABLES.SERVICES} đã được tạo chưa\n3. RLS policies đã được cấu hình chưa`);
     }
   };
 
@@ -751,27 +877,44 @@ export const Services: React.FC = () => {
     }
 
     try {
-      // Cập nhật đối tượng dịch vụ
+      // Cập nhật đối tượng dịch vụ với tên cột tiếng Việt
       const serviceData: any = {
-        id: selectedService.id,
-        name: newService.name,
-        category: newService.category,
-        categoryPath: categoryPath,
-        price: parseInt(newService.price),
-        desc: newService.desc || '',
-        workflows: newService.workflows.sort((a, b) => a.order - b.order),
-        image: newService.image || ''
+        ten_dich_vu: newService.name,
+        gia_niem_yet: parseFloat(newService.price),
+        mo_ta: newService.desc || '',
+        anh_dich_vu: newService.image || '',
+        id_quy_trinh: newService.workflows[0]?.id || null, // Legacy field
+        cac_buoc_quy_trinh: newService.workflows.sort((a, b) => a.order - b.order)
       };
+      
+      // Lưu categoryPath vào 4 cột cap_1, cap_2, cap_3, cap_4
+      if (categoryPath.length > 0) {
+        serviceData.cap_1 = categoryPath[0] || null;
+        serviceData.cap_2 = categoryPath[1] || null;
+        serviceData.cap_3 = categoryPath[2] || null;
+        serviceData.cap_4 = categoryPath[3] || null;
+      } else {
+        // Nếu không có categoryPath, set tất cả về null
+        serviceData.cap_1 = null;
+        serviceData.cap_2 = null;
+        serviceData.cap_3 = null;
+        serviceData.cap_4 = null;
+      }
 
-      // Lưu vào Firebase
-      await set(ref(db, `${DB_PATHS.SERVICES}/${selectedService.id}`), serviceData);
+      // Lưu vào Supabase
+      const { error } = await supabase
+        .from(DB_TABLES.SERVICES)
+        .update(serviceData)
+        .eq('id', selectedService.id);
+
+      if (error) throw error;
 
       const workflowLabels = newService.workflows
         .sort((a, b) => a.order - b.order)
         .map(w => workflows.find(wf => wf.id === w.id)?.label)
         .filter(Boolean);
 
-      alert(`Cập nhật dịch vụ thành công!\n\nTên: ${newService.name}\nDanh mục: ${newService.category}\nGiá: ${parseInt(newService.price).toLocaleString()} ₫\nQuy trình: ${workflowLabels.join(' → ')}\n\nĐã lưu vào Firebase!`);
+      alert(`Cập nhật dịch vụ thành công!\n\nTên: ${newService.name}\nDanh mục: ${newService.category}\nGiá: ${parseFloat(newService.price).toLocaleString()} ₫\nQuy trình: ${workflowLabels.join(' → ')}\n\nĐã lưu vào Supabase!`);
 
       setNewService({
         name: '',
@@ -781,14 +924,17 @@ export const Services: React.FC = () => {
         workflows: [],
         image: ''
       });
+      setCategoryPath([]);
       setWorkflowSearch('');
       setShowEditModal(false);
       setSelectedService(null);
-      // Services will be updated automatically via Firebase listener
+      
+      // Reload services
+      loadServices();
     } catch (error: any) {
       console.error('Lỗi khi cập nhật dịch vụ:', error);
       const errorMessage = error?.message || String(error);
-      alert('Lỗi khi cập nhật dịch vụ vào Firebase:\n' + errorMessage + '\n\nVui lòng kiểm tra kết nối Firebase và thử lại.');
+      alert('Lỗi khi cập nhật dịch vụ vào Supabase:\n' + errorMessage + '\n\nVui lòng kiểm tra kết nối Supabase và thử lại.');
     }
   };
 
@@ -858,17 +1004,29 @@ export const Services: React.FC = () => {
           // Cập nhật tên ở level này
           if (updatedPath[level] === category.name) {
             updatedPath[level] = newName.trim();
-            const updatedService = {
-              ...service,
-              categoryPath: updatedPath,
-              category: updatedPath.join(' > ')
+            
+            // Cập nhật vào Supabase với tên cột tiếng Việt
+            // Lưu updatedPath vào 4 cột cap_1, cap_2, cap_3, cap_4
+            const updateData: any = {
+              cap_1: updatedPath[0] || null,
+              cap_2: updatedPath[1] || null,
+              cap_3: updatedPath[2] || null,
+              cap_4: updatedPath[3] || null
             };
-            await set(ref(db, `${DB_PATHS.SERVICES}/${service.id}`), updatedService);
-            updatedCount++;
+            
+            const { error } = await supabase
+              .from(DB_TABLES.SERVICES)
+              .update(updateData)
+              .eq('id', service.id);
+            
+            if (!error) updatedCount++;
           }
         })
       );
       alert(`Đã cập nhật ${updatedCount}/${servicesToUpdate.length} dịch vụ (bao gồm cả các cấp con) với tên danh mục mới: "${newName}"`);
+      
+      // Reload services
+      loadServices();
     } catch (error: any) {
       console.error('Lỗi khi cập nhật danh mục:', error);
       alert('Lỗi khi cập nhật danh mục: ' + (error?.message || String(error)));
@@ -904,15 +1062,25 @@ export const Services: React.FC = () => {
             // Xóa phần categoryPath từ vị trí category này trở đi
             const level = categoryPath.length - 1;
             const updatedPath = service.categoryPath!.slice(0, level);
-            const updatedService = {
-              ...service,
-              categoryPath: updatedPath.length > 0 ? updatedPath : [],
-              category: updatedPath.length > 0 ? updatedPath.join(' > ') : 'Chưa phân loại'
-            };
-            await set(ref(db, `${DB_PATHS.SERVICES}/${service.id}`), updatedService);
+            
+            // Cập nhật vào Supabase với tên cột tiếng Việt
+            const { error } = await supabase
+              .from(DB_TABLES.SERVICES)
+              .update({
+                cap_1: updatedPath[0] || null,
+                cap_2: updatedPath[1] || null,
+                cap_3: updatedPath[2] || null,
+                cap_4: updatedPath[3] || null
+              })
+              .eq('id', service.id);
+            
+            if (error) throw error;
           })
         );
         alert(`Đã xóa danh mục "${category.name}" và cập nhật ${servicesToUpdate.length} dịch vụ!`);
+        
+        // Reload services
+        loadServices();
       } catch (error: any) {
         console.error('Lỗi khi xóa danh mục:', error);
         alert('Lỗi khi xóa danh mục: ' + (error?.message || String(error)));
@@ -932,19 +1100,19 @@ export const Services: React.FC = () => {
     }
 
     try {
-      // Kiểm tra xem dịch vụ có trong Firebase không
-      const snapshot = await get(ref(db, `${DB_PATHS.SERVICES}/${service.id}`));
+      // Xóa từ Supabase
+      const { error } = await supabase
+        .from(DB_TABLES.SERVICES)
+        .delete()
+        .eq('id', service.id);
 
-      if (snapshot.exists()) {
-        // Xóa từ Firebase nếu có
-        await remove(ref(db, `${DB_PATHS.SERVICES}/${service.id}`));
-        // Services will be updated automatically via Firebase listener
-      } else {
-        // Nếu không có trong Firebase, chỉ xóa khỏi state local (MOCK data)
-        setServices(prev => prev.filter(s => s.id !== service.id));
-      }
+      if (error) throw error;
+
+      // Reload services
+      loadServices();
     } catch (error: any) {
       console.error('Lỗi khi xóa dịch vụ:', error);
+      alert('Lỗi khi xóa dịch vụ: ' + (error?.message || String(error)));
     }
   };
 
@@ -954,6 +1122,9 @@ export const Services: React.FC = () => {
       <CategorySidebar
         categories={mergedCategories}
         selectedCategory={selectedCategory}
+        categoryFilter={categoryFilter}
+        onCategoryFilterChange={setCategoryFilter}
+        categoryOptions={categories}
         onSelectCategory={(categoryId) => {
           setSelectedCategory(categoryId);
           // Tự động điền categoryPath vào form khi chọn category từ sidebar
@@ -1225,7 +1396,7 @@ export const Services: React.FC = () => {
                   <div className="max-h-64 overflow-y-auto border border-neutral-700 rounded-lg bg-neutral-800/50 p-3 space-y-2 mb-3">
                     {workflows.length === 0 ? (
                       <div className="text-center py-4 text-slate-500 text-sm">
-                        Đang tải quy trình từ Firebase...
+                        Đang tải quy trình từ Supabase...
                       </div>
                     ) : (
                       workflows
@@ -1547,7 +1718,7 @@ export const Services: React.FC = () => {
                   <div className="max-h-64 overflow-y-auto border border-neutral-700 rounded-lg bg-neutral-800/50 p-3 space-y-2 mb-3">
                     {workflows.length === 0 ? (
                       <div className="text-center py-4 text-slate-500 text-sm">
-                        Đang tải quy trình từ Firebase...
+                        Đang tải quy trình từ Supabase...
                       </div>
                     ) : (
                       workflows
@@ -1798,21 +1969,10 @@ export const Services: React.FC = () => {
           {/* ROW 2: Filters */}
           <div className="flex flex-wrap gap-2 pt-2 border-t border-neutral-800">
             <TableFilter onFilterChange={setFilter} />
-            <select
-              value={categoryFilter}
-              onChange={(e) => setCategoryFilter(e.target.value)}
-              className="px-3 py-2 bg-neutral-800 border border-neutral-700 rounded-lg text-slate-300 text-sm focus:ring-1 focus:ring-gold-500 outline-none"
-            >
-              <option value="all">Tất cả danh mục</option>
-              {categories.filter(c => c !== 'all').map(cat => (
-                <option key={cat} value={cat}>{cat}</option>
-              ))}
-            </select>
           </div>
         </div>
 
-        {/* Services List by Tier */}
-        {/* Services Table Layout */}
+        {/* Services Table - Simple List */}
         <div className="bg-neutral-900 rounded-xl shadow-lg shadow-black/20 border border-neutral-800 flex flex-col overflow-hidden min-h-0 flex-1">
           <div className="overflow-auto flex-1 h-[600px]">
             <table className="w-full text-left border-collapse relative">
@@ -1820,7 +1980,6 @@ export const Services: React.FC = () => {
                 <tr className="border-b border-neutral-800 text-slate-500 text-xs font-bold uppercase tracking-wider bg-neutral-800/50">
                   <th className="p-4 w-12 text-center">#</th>
                   <th className="p-4 min-w-[200px]">Dịch Vụ</th>
-                  <th className="p-4">Danh Mục</th>
                   <th className="p-4">Quy Trình</th>
                   <th className="p-4 text-right">Đơn Giá</th>
                   <th className="p-4 w-12 sticky right-0 bg-neutral-900 z-30"></th>
@@ -1828,80 +1987,76 @@ export const Services: React.FC = () => {
               </thead>
               <tbody className="divide-y divide-neutral-800">
                 {isLoading ? (
-                  <tr><td colSpan={6} className="p-12 text-center text-slate-500">Đang tải dịch vụ...</td></tr>
+                  <tr><td colSpan={5} className="p-12 text-center text-slate-500">Đang tải dịch vụ...</td></tr>
                 ) : filteredServices.length === 0 ? (
-                  <tr><td colSpan={6} className="p-12 text-center text-slate-500">Không tìm thấy dịch vụ nào phù hợp</td></tr>
-                ) : filteredServices.map((service, index) => {
+                  <tr><td colSpan={5} className="p-12 text-center text-slate-500">Không tìm thấy dịch vụ nào phù hợp</td></tr>
+                ) : (
+                  filteredServices.map((service, index) => {
+                    // Xử lý workflows logic
+                    let svcWorkflows: Array<{ id: string; order: number }> = [];
+                    if (service.workflows && Array.isArray(service.workflows)) {
+                      svcWorkflows = service.workflows;
+                    } else {
+                      const workflowIds = Array.isArray(service.workflowId)
+                        ? service.workflowId
+                        : [service.workflowId].filter(Boolean);
+                      svcWorkflows = workflowIds.map((id, idx) => ({ id, order: idx + 1 }));
+                    }
 
-                  // Xử lý workflows logic
-                  let svcWorkflows: Array<{ id: string; order: number }> = [];
-                  if (service.workflows && Array.isArray(service.workflows)) {
-                    svcWorkflows = service.workflows;
-                  } else {
-                    const workflowIds = Array.isArray(service.workflowId)
-                      ? service.workflowId
-                      : [service.workflowId].filter(Boolean);
-                    svcWorkflows = workflowIds.map((id, idx) => ({ id, order: idx + 1 }));
-                  }
+                    const sortedWorkflows = svcWorkflows
+                      .sort((a, b) => a.order - b.order)
+                      .map(w => workflows.find(wf => wf.id === w.id))
+                      .filter(Boolean);
 
-                  const sortedWorkflows = svcWorkflows
-                    .sort((a, b) => a.order - b.order)
-                    .map(w => workflows.find(wf => wf.id === w.id))
-                    .filter(Boolean);
-
-                  return (
-                    <tr key={service.id} className="transition-colors cursor-pointer group hover:bg-neutral-800/50" onClick={() => handleViewService(service)}>
-                      <td className="p-4 text-center text-slate-600 text-xs">{index + 1}</td>
-                      <td className="p-4">
-                        <div className="flex items-center gap-4">
-                          <div className="w-12 h-12 rounded-lg border border-neutral-700 overflow-hidden bg-neutral-800 flex-shrink-0">
-                            {service.image ? (
-                              <img src={service.image} className="w-full h-full object-cover" alt={service.name} />
+                    return (
+                      <tr key={service.id} className="transition-colors cursor-pointer group hover:bg-neutral-800/50" onClick={() => handleViewService(service)}>
+                        <td className="p-4 text-center text-slate-600 text-xs">{index + 1}</td>
+                        <td className="p-4">
+                          <div className="flex items-center gap-4">
+                            <div className="w-12 h-12 rounded-lg border border-neutral-700 overflow-hidden bg-neutral-800 flex-shrink-0">
+                              {service.image ? (
+                                <img src={service.image} className="w-full h-full object-cover" alt={service.name} />
+                              ) : (
+                                <div className="w-full h-full flex items-center justify-center text-slate-600"><Briefcase size={20} /></div>
+                              )}
+                            </div>
+                            <div>
+                              <div className="font-bold text-slate-200">{service.name}</div>
+                              <div className="text-xs text-slate-500 font-mono mt-0.5">#{service.id}</div>
+                            </div>
+                          </div>
+                        </td>
+                        <td className="p-4">
+                          <div className="flex flex-wrap gap-1">
+                            {sortedWorkflows.length > 0 ? (
+                              sortedWorkflows.map((workflow, idx) => {
+                                if (!workflow) return null;
+                                return (
+                                  <span key={workflow.id} className={`px-2 py-0.5 rounded-full text-[10px] font-bold border flex items-center gap-1 ${workflow.color}`}>
+                                    {workflow.label}
+                                  </span>
+                                );
+                              })
                             ) : (
-                              <div className="w-full h-full flex items-center justify-center text-slate-600"><Briefcase size={20} /></div>
+                              <span className="text-xs text-slate-500 italic">--</span>
                             )}
                           </div>
-                          <div>
-                            <div className="font-bold text-slate-200">{service.name}</div>
-                            <div className="text-xs text-slate-500 font-mono mt-0.5">#{service.id}</div>
-                          </div>
-                        </div>
-                      </td>
-                      <td className="p-4">
-                        <span className="text-sm text-slate-300 bg-neutral-800 px-2 py-1 rounded border border-neutral-700">
-                          {service.category}
-                        </span>
-                      </td>
-                      <td className="p-4">
-                        <div className="flex flex-wrap gap-1">
-                          {sortedWorkflows.length > 0 ? (
-                            sortedWorkflows.map((workflow, idx) => {
-                              if (!workflow) return null;
-                              return (
-                                <span key={workflow.id} className={`px-2 py-0.5 rounded-full text-[10px] font-bold border flex items-center gap-1 ${workflow.color}`}>
-                                  {workflow.label}
-                                </span>
-                              );
-                            })
-                          ) : (
-                            <span className="text-xs text-slate-500 italic">--</span>
-                          )}
-                        </div>
-                      </td>
-                      <td className="p-4 text-right font-bold text-gold-400">
-                        {service.price.toLocaleString()} ₫
-                      </td>
-                      <td className="p-4 sticky right-0 bg-neutral-900/95 backdrop-blur-sm group-hover:bg-neutral-800 transition-colors z-20">
-                        <ActionMenu
-                          itemName={service.name}
-                          onView={() => handleViewService(service)}
-                          onEdit={() => handleEditService(service)}
-                          onDelete={() => handleDeleteService(service)}
-                        />
-                      </td>
-                    </tr>
-                  );
-                })}
+                        </td>
+                        <td className="p-4 text-right font-bold text-gold-400">
+                          {service.price.toLocaleString()} ₫
+                        </td>
+                        <td className="p-4 sticky right-0 bg-neutral-900/95 backdrop-blur-sm group-hover:bg-neutral-800 transition-colors z-20">
+                          <ActionMenu
+                            itemName={service.name}
+                            onView={() => handleViewService(service)}
+                            onEdit={() => handleEditService(service)}
+                            onDelete={() => handleDeleteService(service)}
+                          />
+                        </td>
+                      </tr>
+                    );
+                  })
+                )}
               </tbody>
             </table>
           </div>

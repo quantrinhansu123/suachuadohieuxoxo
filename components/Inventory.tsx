@@ -133,8 +133,8 @@ export const Inventory: React.FC = () => {
     }
     
     try {
+      // Không tạo ID - để database tự tạo
       const newInventoryItem: any = {
-        id: `INV${Date.now().toString().slice(-6)}`,
         sku: finalSKU.toUpperCase(),
         name: newItem.name,
         category: newItem.category,

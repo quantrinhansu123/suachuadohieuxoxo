@@ -1,7 +1,108 @@
 import React, { useState, useMemo, useRef, useEffect } from 'react';
-import { Users, Search, Plus, Phone, Mail, Building2, Briefcase, UserCheck, UserX, MoreHorizontal, Eye, Edit, Trash2 } from 'lucide-react';
+import { Users, Search, Plus, Phone, Mail, Building2, Briefcase, UserCheck, UserX, MoreHorizontal, Eye, Edit, Trash2, X } from 'lucide-react';
 import { Member } from '../types';
 import { useAppStore } from '../context';
+
+// Component Select với khả năng thêm mới
+const SelectWithAdd: React.FC<{
+  value: string;
+  onChange: (value: string) => void;
+  options: string[];
+  onAddNew: (newValue: string) => void;
+  placeholder?: string;
+  className?: string;
+  label?: string;
+}> = ({ value, onChange, options, onAddNew, placeholder, className, label }) => {
+  const [isAdding, setIsAdding] = useState(false);
+  const [newValue, setNewValue] = useState('');
+  const inputRef = useRef<HTMLInputElement>(null);
+
+  const handleAddNew = () => {
+    if (newValue.trim() && !options.includes(newValue.trim())) {
+      onAddNew(newValue.trim());
+      onChange(newValue.trim());
+      setNewValue('');
+      setIsAdding(false);
+    }
+  };
+
+  useEffect(() => {
+    if (isAdding && inputRef.current) {
+      inputRef.current.focus();
+    }
+  }, [isAdding]);
+
+  return (
+    <div className="relative">
+      {label && (
+        <label className="block text-sm font-medium text-slate-400 mb-2">
+          {label}
+        </label>
+      )}
+      {!isAdding ? (
+        <div className="flex gap-2">
+          <select
+            value={value}
+            onChange={(e) => onChange(e.target.value)}
+            className={`flex-1 ${className || ''}`}
+          >
+            {placeholder && <option value="">{placeholder}</option>}
+            {options.map(opt => (
+              <option key={opt} value={opt}>{opt}</option>
+            ))}
+          </select>
+          <button
+            type="button"
+            onClick={() => setIsAdding(true)}
+            className="px-3 py-2 bg-neutral-700 hover:bg-neutral-600 border border-neutral-600 rounded-lg text-slate-300 transition-colors flex items-center gap-1"
+            title="Thêm mới"
+          >
+            <Plus size={16} />
+          </button>
+        </div>
+      ) : (
+        <div className="flex gap-2">
+          <input
+            ref={inputRef}
+            type="text"
+            value={newValue}
+            onChange={(e) => setNewValue(e.target.value)}
+            onKeyDown={(e) => {
+              if (e.key === 'Enter') {
+                e.preventDefault();
+                handleAddNew();
+              } else if (e.key === 'Escape') {
+                setIsAdding(false);
+                setNewValue('');
+              }
+            }}
+            placeholder="Nhập giá trị mới..."
+            className={`flex-1 px-4 py-2 bg-neutral-800 border border-neutral-700 rounded-lg text-slate-200 focus:ring-2 focus:ring-gold-500 outline-none transition-all placeholder-slate-600`}
+          />
+          <button
+            type="button"
+            onClick={handleAddNew}
+            className="px-3 py-2 bg-gold-600 hover:bg-gold-700 text-black rounded-lg transition-colors"
+            title="Lưu"
+          >
+            <Plus size={16} />
+          </button>
+          <button
+            type="button"
+            onClick={() => {
+              setIsAdding(false);
+              setNewValue('');
+            }}
+            className="px-3 py-2 bg-neutral-700 hover:bg-neutral-600 border border-neutral-600 rounded-lg text-slate-300 transition-colors"
+            title="Hủy"
+          >
+            <X size={16} />
+          </button>
+        </div>
+      )}
+    </div>
+  );
+};
 
 // Action Menu Component
 const ActionMenu: React.FC<{
@@ -99,13 +200,75 @@ export const Members: React.FC = () => {
   const [newMember, setNewMember] = useState({
     name: '',
     role: 'Tư vấn viên' as Member['role'],
-    department: 'Kinh Doanh' as Member['department'],
+    department: undefined as Member['department'] | undefined,
     phone: '',
     email: '',
     status: 'Active' as Member['status'],
     specialty: '',
     avatar: ''
   });
+
+  // Lưu các giá trị tùy chỉnh vào localStorage
+  const [customRoles, setCustomRoles] = useState<string[]>(() => {
+    const saved = localStorage.getItem('custom_roles');
+    return saved ? JSON.parse(saved) : [];
+  });
+
+  const [customDepartments, setCustomDepartments] = useState<string[]>(() => {
+    const saved = localStorage.getItem('custom_departments');
+    return saved ? JSON.parse(saved) : [];
+  });
+
+  const [customStatuses, setCustomStatuses] = useState<string[]>(() => {
+    const saved = localStorage.getItem('custom_statuses');
+    return saved ? JSON.parse(saved) : [];
+  });
+
+  // Danh sách các giá trị mặc định (phải khớp với database constraint)
+  const defaultRoles: string[] = ['Tư vấn viên', 'Kỹ thuật viên', 'QC', 'Quản lý'];
+  const defaultDepartments: string[] = ['Kỹ Thuật', 'Spa', 'QA/QC', 'Hậu Cần', 'Quản Lý', 'Kinh Doanh'];
+  const defaultStatuses: string[] = ['Active', 'Off'];
+
+  // Mapping để validate giá trị hợp lệ cho database
+  const validDepartments = new Set(defaultDepartments);
+  const validRoles = new Set(defaultRoles);
+  const validStatuses = new Set(defaultStatuses);
+
+  // Kết hợp giá trị mặc định và tùy chỉnh
+  const allRoles = useMemo(() => [...defaultRoles, ...customRoles], [customRoles]);
+  const allDepartments = useMemo(() => [...defaultDepartments, ...customDepartments], [customDepartments]);
+  const allStatuses = useMemo(() => [...defaultStatuses, ...customStatuses], [customStatuses]);
+
+  // Hàm thêm giá trị mới (cho phép bất kỳ vai trò nào)
+  const handleAddRole = (newRole: string) => {
+    // Cho phép thêm bất kỳ vai trò nào
+    if (!customRoles.includes(newRole)) {
+      const updated = [...customRoles, newRole];
+      setCustomRoles(updated);
+      localStorage.setItem('custom_roles', JSON.stringify(updated));
+    }
+  };
+
+  const handleAddDepartment = (newDept: string) => {
+    // Cho phép thêm bất kỳ giá trị phòng ban nào
+    if (!customDepartments.includes(newDept)) {
+      const updated = [...customDepartments, newDept];
+      setCustomDepartments(updated);
+      localStorage.setItem('custom_departments', JSON.stringify(updated));
+    }
+  };
+
+  const handleAddStatus = (newStatus: string) => {
+    if (!validStatuses.has(newStatus)) {
+      alert(`Trạng thái "${newStatus}" không hợp lệ. Chỉ cho phép: ${defaultStatuses.join(', ')}`);
+      return;
+    }
+    if (!customStatuses.includes(newStatus)) {
+      const updated = [...customStatuses, newStatus];
+      setCustomStatuses(updated);
+      localStorage.setItem('custom_statuses', JSON.stringify(updated));
+    }
+  };
 
   // Group members by department
   const membersByDept = useMemo(() => {
@@ -148,8 +311,9 @@ export const Members: React.FC = () => {
     }
 
     try {
+      // Không tạo ID - để database tự tạo
       const memberData: Member = {
-        id: `S${Date.now().toString().slice(-6)}`,
+        id: '', // Tạm thời để trống, sẽ được cập nhật sau khi tạo
         name: newMember.name,
         role: newMember.role,
         phone: newMember.phone,
@@ -162,17 +326,21 @@ export const Members: React.FC = () => {
 
       await addMember(memberData);
 
+      // Đóng modal và reset form
+      setShowAddModal(false);
       setNewMember({
         name: '',
         role: 'Tư vấn viên',
-        department: 'Kinh Doanh',
+        department: undefined,
         phone: '',
         email: '',
         status: 'Active',
         specialty: '',
         avatar: ''
       });
-      setShowAddModal(false);
+
+      // Hiển thị thông báo thành công
+      alert('Đã thêm nhân sự thành công!');
     } catch (error: any) {
       console.error('Lỗi khi thêm nhân sự:', error);
       alert('Lỗi khi thêm nhân sự: ' + (error?.message || String(error)));
@@ -195,11 +363,18 @@ export const Members: React.FC = () => {
       };
 
       await updateMember(editingMember.id, updatedData);
+      
+      // Đóng modal và reset
       setShowEditModal(false);
       setEditingMember(null);
+      
+      // Hiển thị thông báo thành công
+      alert('Đã cập nhật nhân sự thành công!');
     } catch (error: any) {
       console.error('Lỗi khi cập nhật nhân sự:', error);
-      alert('Lỗi khi cập nhật nhân sự: ' + (error?.message || String(error)));
+      const errorMessage = error?.message || String(error);
+      alert('Lỗi khi cập nhật nhân sự: ' + errorMessage);
+      // Không đóng modal nếu có lỗi để người dùng có thể sửa lại
     }
   };
 
@@ -257,53 +432,44 @@ export const Members: React.FC = () => {
 
               <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
                 <div>
-                  <label className="block text-sm font-medium text-slate-400 mb-2">
-                    Vai trò <span className="text-red-500">*</span>
-                  </label>
-                  <select
+                  <SelectWithAdd
+                    label="Vai trò *"
                     value={newMember.role}
-                    onChange={(e) => {
-                      const role = e.target.value as Member['role'];
-                      setNewMember({ ...newMember, role, department: getDepartment(role) as Member['department'] });
+                    onChange={(role) => {
+                      setNewMember({ 
+                        ...newMember, 
+                        role: role as Member['role'], 
+                        department: getDepartment(role as Member['role']) as Member['department'] 
+                      });
                     }}
+                    options={allRoles}
+                    onAddNew={handleAddRole}
                     className="w-full px-4 py-2 bg-neutral-800 border border-neutral-700 rounded-lg text-slate-200 focus:ring-2 focus:ring-gold-500 outline-none transition-all"
-                  >
-                    <option value="Tư vấn viên">Tư vấn viên</option>
-                    <option value="Kỹ thuật viên">Kỹ thuật viên</option>
-                    <option value="QC">QC</option>
-                    <option value="Quản lý">Quản lý</option>
-                  </select>
+                  />
                 </div>
 
                 <div>
-                  <label className="block text-sm font-medium text-slate-400 mb-2">
-                    Phòng ban <span className="text-red-500">*</span>
-                  </label>
-                  <select
-                    value={newMember.department}
-                    onChange={(e) => setNewMember({ ...newMember, department: e.target.value as Member['department'] })}
+                  <SelectWithAdd
+                    label="Phòng ban"
+                    value={newMember.department || ''}
+                    onChange={(dept) => setNewMember({ ...newMember, department: dept as Member['department'] || undefined })}
+                    options={allDepartments}
+                    onAddNew={handleAddDepartment}
+                    placeholder="Chọn phòng ban (tùy chọn)"
                     className="w-full px-4 py-2 bg-neutral-800 border border-neutral-700 rounded-lg text-slate-200 focus:ring-2 focus:ring-gold-500 outline-none transition-all"
-                  >
-                    <option value="Kỹ Thuật">Kỹ Thuật</option>
-                    <option value="Spa">Spa</option>
-                    <option value="QA/QC">QA/QC</option>
-                    <option value="Hậu Cần">Hậu Cần</option>
-                    <option value="Quản Lý">Quản Lý</option>
-                    <option value="Kinh Doanh">Kinh Doanh</option>
-                  </select>
+                  />
                 </div>
               </div>
 
               <div>
-                <label className="block text-sm font-medium text-slate-400 mb-2">Trạng thái</label>
-                <select
+                <SelectWithAdd
+                  label="Trạng thái"
                   value={newMember.status}
-                  onChange={(e) => setNewMember({ ...newMember, status: e.target.value as Member['status'] })}
+                  onChange={(status) => setNewMember({ ...newMember, status: status as Member['status'] })}
+                  options={allStatuses}
+                  onAddNew={handleAddStatus}
                   className="w-full px-4 py-2 bg-neutral-800 border border-neutral-700 rounded-lg text-slate-200 focus:ring-2 focus:ring-gold-500 outline-none transition-all"
-                >
-                  <option value="Active">Đang làm việc</option>
-                  <option value="Off">Nghỉ việc</option>
-                </select>
+                />
               </div>
 
               <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
@@ -439,57 +605,44 @@ export const Members: React.FC = () => {
 
               <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
                 <div>
-                  <label className="block text-sm font-medium text-slate-400 mb-2">
-                    Vai trò <span className="text-red-500">*</span>
-                  </label>
-                  <select
+                  <SelectWithAdd
+                    label="Vai trò *"
                     value={editingMember.role}
-                    onChange={(e) => {
-                      const role = e.target.value as Member['role'];
+                    onChange={(role) => {
                       setEditingMember({
                         ...editingMember,
-                        role,
-                        department: getDepartment(role) as Member['department']
+                        role: role as Member['role'],
+                        department: getDepartment(role as Member['role']) as Member['department']
                       });
                     }}
+                    options={allRoles}
+                    onAddNew={handleAddRole}
                     className="w-full px-4 py-2 bg-neutral-800 border border-neutral-700 rounded-lg text-slate-200 focus:ring-2 focus:ring-gold-500 outline-none transition-all"
-                  >
-                    <option value="Tư vấn viên">Tư vấn viên</option>
-                    <option value="Kỹ thuật viên">Kỹ thuật viên</option>
-                    <option value="QC">QC</option>
-                    <option value="Quản lý">Quản lý</option>
-                  </select>
+                  />
                 </div>
 
                 <div>
-                  <label className="block text-sm font-medium text-slate-400 mb-2">
-                    Phòng ban <span className="text-red-500">*</span>
-                  </label>
-                  <select
-                    value={editingMember.department || getDepartment(editingMember.role)}
-                    onChange={(e) => setEditingMember({ ...editingMember, department: e.target.value as Member['department'] })}
+                  <SelectWithAdd
+                    label="Phòng ban"
+                    value={editingMember.department || ''}
+                    onChange={(dept) => setEditingMember({ ...editingMember, department: (dept || undefined) as Member['department'] })}
+                    options={allDepartments}
+                    onAddNew={handleAddDepartment}
+                    placeholder="Chọn phòng ban (tùy chọn)"
                     className="w-full px-4 py-2 bg-neutral-800 border border-neutral-700 rounded-lg text-slate-200 focus:ring-2 focus:ring-gold-500 outline-none transition-all"
-                  >
-                    <option value="Kỹ Thuật">Kỹ Thuật</option>
-                    <option value="Spa">Spa</option>
-                    <option value="QA/QC">QA/QC</option>
-                    <option value="Hậu Cần">Hậu Cần</option>
-                    <option value="Quản Lý">Quản Lý</option>
-                    <option value="Kinh Doanh">Kinh Doanh</option>
-                  </select>
+                  />
                 </div>
               </div>
 
               <div>
-                <label className="block text-sm font-medium text-slate-400 mb-2">Trạng thái</label>
-                <select
+                <SelectWithAdd
+                  label="Trạng thái"
                   value={editingMember.status}
-                  onChange={(e) => setEditingMember({ ...editingMember, status: e.target.value as Member['status'] })}
+                  onChange={(status) => setEditingMember({ ...editingMember, status: status as Member['status'] })}
+                  options={allStatuses}
+                  onAddNew={handleAddStatus}
                   className="w-full px-4 py-2 bg-neutral-800 border border-neutral-700 rounded-lg text-slate-200 focus:ring-2 focus:ring-gold-500 outline-none transition-all"
-                >
-                  <option value="Active">Đang làm việc</option>
-                  <option value="Off">Nghỉ việc</option>
-                </select>
+                />
               </div>
 
               <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
@@ -699,7 +852,6 @@ export const Members: React.FC = () => {
                             <Briefcase size={10} />
                             {member.role}
                           </span>
-                          <span className="font-mono text-slate-600 text-xs">#{member.id}</span>
                         </div>
                       </div>
                       <ActionMenu

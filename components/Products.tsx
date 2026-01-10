@@ -4,8 +4,7 @@ import { MOCK_PRODUCTS } from '../constants';
 import { TableFilter, FilterState } from './TableFilter';
 import { useAppStore } from '../context';
 import { Product } from '../types';
-import { ref, get, onValue } from 'firebase/database';
-import { db, DB_PATHS } from '../firebase';
+import { supabase, DB_PATHS } from '../supabase';
 
 // Action Menu Component
 const ActionMenu: React.FC<{ 
@@ -101,11 +100,13 @@ export const Products: React.FC = () => {
     desc: ''
   });
 
-  // Load products from Firebase
+  // Load products from Supabase
   useEffect(() => {
     const loadProducts = async () => {
       try {
-        const snapshot = await get(ref(db, DB_PATHS.PRODUCTS));
+        const { data, error } = await supabase
+          .from(DB_PATHS.PRODUCTS)
+          .select('*');
         
         // Bắt đầu với MOCK data
         const mergedProducts = new Map<string, Product>();
@@ -115,12 +116,10 @@ export const Products: React.FC = () => {
           mergedProducts.set(prod.id, { ...prod });
         });
         
-        // Merge với data từ Firebase (ưu tiên Firebase nếu trùng ID)
-        if (snapshot.exists()) {
-          const data = snapshot.val();
-          Object.keys(data).forEach(key => {
-            const prod = data[key];
-            const productId = prod.id || key;
+        // Merge với data từ Supabase (ưu tiên Supabase nếu trùng ID)
+        if (!error && data) {
+          data.forEach(prod => {
+            const productId = prod.id || '';
             mergedProducts.set(productId, {
               id: productId,
               name: prod.name || '',
@@ -145,39 +144,46 @@ export const Products: React.FC = () => {
     loadProducts();
 
     // Listen for real-time updates
-    const productsRef = ref(db, DB_PATHS.PRODUCTS);
-    const unsubscribe = onValue(productsRef, (snapshot) => {
-      if (snapshot.exists()) {
-        const data = snapshot.val();
-        const mergedProducts = new Map<string, Product>();
-        
-        // Thêm tất cả MOCK products trước
-        MOCK_PRODUCTS.forEach(prod => {
-          mergedProducts.set(prod.id, { ...prod });
-        });
-        
-        // Merge với data từ Firebase
-        Object.keys(data).forEach(key => {
-          const prod = data[key];
-          const productId = prod.id || key;
-          mergedProducts.set(productId, {
-            id: productId,
-            name: prod.name || '',
-            category: prod.category || '',
-            price: prod.price || 0,
-            stock: prod.stock || 0,
-            image: prod.image || '',
-            desc: prod.desc || undefined
-          } as Product);
-        });
-        
-        setProducts(Array.from(mergedProducts.values()));
-      } else {
-        setProducts(MOCK_PRODUCTS);
-      }
-    });
+    const channel = supabase
+      .channel('products-changes')
+      .on(
+        'postgres_changes',
+        {
+          event: '*',
+          schema: 'public',
+          table: DB_PATHS.PRODUCTS,
+        },
+        async () => {
+          // Reload products on change
+          const { data } = await supabase.from(DB_PATHS.PRODUCTS).select('*');
+          if (data) {
+            const mergedProducts = new Map<string, Product>();
+            MOCK_PRODUCTS.forEach(prod => {
+              mergedProducts.set(prod.id, { ...prod });
+            });
+            data.forEach(prod => {
+              const productId = prod.id || '';
+              mergedProducts.set(productId, {
+                id: productId,
+                name: prod.name || '',
+                category: prod.category || '',
+                price: prod.price || 0,
+                stock: prod.stock || 0,
+                image: prod.image || '',
+                desc: prod.desc || undefined
+              } as Product);
+            });
+            setProducts(Array.from(mergedProducts.values()));
+          } else {
+            setProducts(MOCK_PRODUCTS);
+          }
+        }
+      )
+      .subscribe();
 
-    return () => unsubscribe();
+    return () => {
+      supabase.removeChannel(channel);
+    };
   }, []);
 
   // Lấy danh sách danh mục unique
@@ -212,8 +218,9 @@ export const Products: React.FC = () => {
     }
     
     try {
+      // Không tạo ID - để database tự tạo
       const productData: Product = {
-        id: `PRD${Date.now().toString().slice(-6)}`,
+        id: '', // Tạm thời để trống, sẽ được cập nhật sau khi tạo
         name: newProduct.name,
         category: newProduct.category,
         price: parseInt(newProduct.price),

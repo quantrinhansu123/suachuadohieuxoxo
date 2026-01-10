@@ -235,8 +235,9 @@ export const Customers: React.FC = () => {
   const handleAddCustomer = async () => {
     if (!newCustomer.name || !newCustomer.phone) return alert('Thiếu thông tin!');
     try {
+      // Không tạo ID - để database tự tạo
       await addCustomer({
-        id: `CUS-${Date.now()}`,
+        id: '', // Tạm thời để trống, sẽ được cập nhật sau khi tạo
         ...newCustomer,
         totalSpent: 0,
         lastVisit: new Date().toISOString().split('T')[0]

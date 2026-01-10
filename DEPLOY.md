@@ -44,34 +44,37 @@ netlify deploy --prod --dir=dist
 
 ---
 
-## Deploy lên Firebase Hosting
+## Deploy lên Vercel (Khuyến nghị)
 
-### Bước 1: Cài đặt Firebase CLI
+### Bước 1: Cài đặt Vercel CLI
 ```bash
-npm i -g firebase-tools
+npm i -g vercel
 ```
 
 ### Bước 2: Login
 ```bash
-firebase login
+vercel login
 ```
 
-### Bước 3: Init Firebase
+### Bước 3: Deploy
 ```bash
-firebase init hosting
+vercel
 ```
 
-### Bước 4: Deploy
-```bash
-firebase deploy --only hosting
-```
+Hoặc deploy qua GitHub:
+1. Push code lên GitHub
+2. Kết nối repository với Vercel
+3. Cấu hình environment variables trong Vercel Dashboard
+4. Deploy tự động
 
 ---
 
 ## Lưu ý
 
-- Đảm bảo file `.env` có các biến môi trường cần thiết (nếu có)
-- Firebase config đã được setup trong `firebase.ts`
+- Đảm bảo file `.env` có các biến môi trường cần thiết:
+  - `VITE_SUPABASE_URL`
+  - `VITE_SUPABASE_ANON_KEY`
+- Supabase config đã được setup trong `supabase.ts`
 - Build output nằm trong thư mục `dist/`
 
 

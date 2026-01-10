@@ -7,7 +7,6 @@ import {
   Package,
   Wrench,
   Settings,
-  Search,
   Bell,
   Menu,
   ChevronRight,
@@ -29,13 +28,14 @@ import { Customers } from './components/Customers';
 import { Services } from './components/Services';
 import { Products } from './components/Products';
 import { Workflows } from './components/Workflows';
+import { WorkflowConfig } from './components/WorkflowConfig';
 import { Members } from './components/Members';
 import { Settings as SettingsPage } from './components/Settings';
+import { Login } from './components/Login';
 import { DEFAULT_COMPANY_CONFIG, MOCK_MEMBERS } from './constants';
 import { AppProvider, useAppStore } from './context';
-import { Order, ServiceItem } from './types';
-import { ref, set, get, onValue } from 'firebase/database';
-import { db, DB_PATHS } from './firebase';
+import { Order, ServiceItem, Member } from './types';
+// Removed supabase import - notifications now use localStorage only
 
 
 // --- Sidebar Component ---
@@ -58,7 +58,12 @@ const SidebarItem = ({ to, icon: Icon, label }: { to: string, icon?: any, label:
   );
 };
 
-const Sidebar = () => (
+interface SidebarProps {
+  onLogout: () => void;
+  currentUser: Member | null;
+}
+
+const Sidebar: React.FC<SidebarProps> = ({ onLogout, currentUser }) => (
   <div className="w-64 h-screen bg-neutral-950 border-r border-neutral-900 flex flex-col fixed left-0 top-0 z-20 shadow-2xl shadow-black">
     <div className="p-6">
       <div className="flex items-center gap-3">
@@ -96,7 +101,16 @@ const Sidebar = () => (
     </nav>
 
     <div className="p-4 border-t border-neutral-900">
-      <button className="flex items-center gap-3 w-full px-4 py-2 text-slate-500 hover:text-red-500 transition-colors">
+      {currentUser && (
+        <div className="px-4 py-2 mb-2 text-xs text-slate-500">
+          <div className="font-medium text-slate-400">{currentUser.name}</div>
+          <div>{currentUser.role}</div>
+        </div>
+      )}
+      <button 
+        onClick={onLogout}
+        className="flex items-center gap-3 w-full px-4 py-2 text-slate-500 hover:text-red-500 hover:bg-red-900/10 rounded-lg transition-colors"
+      >
         <LogOut size={18} />
         <span className="font-medium">Đăng xuất</span>
       </button>
@@ -105,7 +119,12 @@ const Sidebar = () => (
 );
 
 // --- Header Component ---
-const Header = () => {
+interface HeaderProps {
+  currentUser: Member | null;
+  onLogout: () => void;
+}
+
+const Header: React.FC<HeaderProps> = ({ currentUser, onLogout }) => {
   const { orders } = useAppStore();
   const [showNotifications, setShowNotifications] = useState(false);
   const [acknowledgedIds, setAcknowledgedIds] = useState<Set<string>>(new Set());
@@ -115,70 +134,33 @@ const Header = () => {
   // Simulate current user ID - in real app, get from auth context
   const CURRENT_USER_ID = 'admin'; // Có thể lấy từ auth context
 
-  // Load acknowledged IDs from Firebase
+  // Load acknowledged IDs from localStorage (đơn giản hơn, không cần Supabase cho tính năng này)
   useEffect(() => {
-    const loadAcknowledgedIds = async () => {
+    const loadAcknowledgedIds = () => {
       try {
-        const snapshot = await get(ref(db, `${DB_PATHS.NOTIFICATIONS}/${CURRENT_USER_ID}`));
-        if (snapshot.exists()) {
-          const data = snapshot.val();
-          const ids = Array.isArray(data) ? data : Object.keys(data || {});
+        const saved = localStorage.getItem('acknowledged_notifications');
+        if (saved) {
+          const ids = JSON.parse(saved) as string[];
           setAcknowledgedIds(new Set(ids));
         }
-      } catch (error) {
-        console.error('Error loading acknowledged notifications:', error);
-        // Fallback to localStorage
-        try {
-          const saved = localStorage.getItem('acknowledged_notifications');
-          if (saved) {
-            const ids = JSON.parse(saved) as string[];
-            setAcknowledgedIds(new Set(ids));
-          }
-        } catch (e) {
-          console.error('Error loading from localStorage:', e);
-        }
+      } catch (e) {
+        console.error('Error loading from localStorage:', e);
       } finally {
         setIsLoadingAcknowledged(false);
       }
     };
 
     loadAcknowledgedIds();
+  }, []);
 
-    // Listen for real-time updates
-    const notificationsRef = ref(db, `${DB_PATHS.NOTIFICATIONS}/${CURRENT_USER_ID}`);
-    const unsubscribe = onValue(notificationsRef, (snapshot) => {
-      if (snapshot.exists()) {
-        const data = snapshot.val();
-        const ids = Array.isArray(data) ? data : Object.keys(data || {});
-        setAcknowledgedIds(new Set(ids));
-      }
-    });
-
-    return () => unsubscribe();
-  }, [CURRENT_USER_ID]);
-
-  // Save acknowledged IDs to Firebase
+  // Save acknowledged IDs to localStorage (đơn giản hơn, không cần Supabase cho tính năng này)
   const saveAcknowledgedIds = async (ids: Set<string>) => {
     try {
       const idsArray = Array.from(ids);
-      // Lưu vào Firebase
-      await set(ref(db, `${DB_PATHS.NOTIFICATIONS}/${CURRENT_USER_ID}`), idsArray);
-
-      // Backup vào localStorage
-      try {
-        localStorage.setItem('acknowledged_notifications', JSON.stringify(idsArray));
-      } catch (e) {
-        console.error('Error saving to localStorage:', e);
-      }
-    } catch (error) {
-      console.error('Error saving acknowledged notifications to Firebase:', error);
-      // Fallback to localStorage only
-      try {
-        localStorage.setItem('acknowledged_notifications', JSON.stringify(Array.from(ids)));
-      } catch (e) {
-        console.error('Error saving to localStorage:', e);
-        alert('Lỗi khi lưu thông báo. Vui lòng thử lại.');
-      }
+      localStorage.setItem('acknowledged_notifications', JSON.stringify(idsArray));
+    } catch (e) {
+      console.error('Error saving to localStorage:', e);
+      alert('Lỗi khi lưu thông báo. Vui lòng thử lại.');
     }
   };
 
@@ -245,18 +227,7 @@ const Header = () => {
   const unreadCount = notifications.filter(n => !acknowledgedIds.has(`${n.order.id}-${n.item.id}`)).length;
 
   return (
-    <header className="h-16 bg-neutral-950/80 backdrop-blur-md border-b border-neutral-900 fixed top-0 right-0 left-64 z-10 px-8 flex items-center justify-between">
-      <div className="flex items-center gap-4 w-96">
-        <div className="relative w-full">
-          <Search className="absolute left-3 top-1/2 -translate-y-1/2 text-slate-500" size={18} />
-          <input
-            type="text"
-            placeholder="Tìm kiếm đơn hàng, khách hàng..."
-            className="w-full pl-10 pr-4 py-2 bg-neutral-900 border border-neutral-800 rounded-full text-sm text-slate-200 focus:ring-1 focus:ring-gold-500 focus:border-gold-500 outline-none transition-all placeholder-slate-600"
-          />
-        </div>
-      </div>
-
+    <header className="h-16 bg-neutral-950/80 backdrop-blur-md border-b border-neutral-900 fixed top-0 right-0 left-64 z-10 px-8 flex items-center justify-end">
       <div className="flex items-center gap-6">
         <div className="relative" ref={notificationRef}>
           <button
@@ -357,11 +328,15 @@ const Header = () => {
 
         <div className="flex items-center gap-3 pl-6 border-l border-neutral-800">
           <div className="text-right hidden sm:block">
-            <p className="text-sm font-semibold text-slate-200">Quản trị viên</p>
-            <p className="text-xs text-slate-500">Quản lý trung tâm</p>
+            <p className="text-sm font-semibold text-slate-200">{currentUser?.name || 'Quản trị viên'}</p>
+            <p className="text-xs text-slate-500">{currentUser?.role || 'Quản lý trung tâm'}</p>
           </div>
           <div className="w-10 h-10 rounded-full bg-neutral-800 border border-neutral-700 shadow-sm overflow-hidden">
-            <img src="https://i.pravatar.cc/150?u=admin" alt="User" className="w-full h-full object-cover" />
+            {currentUser?.avatar ? (
+              <img src={currentUser.avatar} alt={currentUser.name} className="w-full h-full object-cover" />
+            ) : (
+              <img src="https://i.pravatar.cc/150?u=admin" alt="User" className="w-full h-full object-cover" />
+            )}
           </div>
         </div>
       </div>
@@ -369,13 +344,100 @@ const Header = () => {
   );
 };
 
+// Tài khoản mặc định để auto-login (chỉ để test) - Định nghĩa bên ngoài component để tránh recreate mỗi render
+const DEFAULT_USER: Member = {
+  id: 'default-user',
+  name: 'Ngô Thanh Vân',
+  role: 'Quản lý',
+  phone: '0909000001',
+  email: 'van.ngo@xoxo.vn',
+  status: 'Active',
+  avatar: 'https://i.pravatar.cc/150?u=van',
+  department: 'quan_ly'
+};
+
+// Load user from localStorage or use default - Hàm helper bên ngoài component
+const loadUserFromStorage = (): Member => {
+  // Kiểm tra xem có localStorage không (tránh lỗi trong SSR hoặc môi trường không có window)
+  if (typeof window === 'undefined' || !window.localStorage) {
+    console.warn('⚠️ localStorage not available, using default user');
+    return DEFAULT_USER;
+  }
+  
+  try {
+    const userStr = localStorage.getItem('currentUser');
+    if (userStr) {
+      try {
+        const parsed = JSON.parse(userStr);
+        if (parsed && parsed.id) {
+          return parsed;
+        }
+      } catch (e) {
+        console.warn('⚠️ Error parsing user from localStorage:', e);
+      }
+    }
+  } catch (e) {
+    console.warn('⚠️ Error loading user from localStorage:', e);
+  }
+  
+  // Auto-login with default user for testing
+  try {
+    localStorage.setItem('currentUser', JSON.stringify(DEFAULT_USER));
+    localStorage.setItem('isAuthenticated', 'true');
+  } catch (e) {
+    console.warn('⚠️ Error saving default user to localStorage:', e);
+  }
+  return DEFAULT_USER;
+};
+
 // --- Main App Component ---
 const AppContent: React.FC = () => {
+  const [currentUser, setCurrentUser] = useState<Member | null>(() => {
+    try {
+      return loadUserFromStorage();
+    } catch (e) {
+      console.error('❌ Error initializing user:', e);
+      return DEFAULT_USER;
+    }
+  });
+  
+  const [isAuthenticated] = useState<boolean>(() => {
+    try {
+      const authStatus = localStorage.getItem('isAuthenticated');
+      return authStatus === 'true' || true; // Always authenticated for testing
+    } catch (e) {
+      console.error('❌ Error checking authentication:', e);
+      return true; // Default to authenticated for testing
+    }
+  });
+
+  const handleLoginSuccess = (member: Member) => {
+    console.log('✅ Login successful, setting user:', member);
+    setCurrentUser(member);
+    localStorage.setItem('currentUser', JSON.stringify(member));
+    localStorage.setItem('isAuthenticated', 'true');
+  };
+
+  const handleLogout = () => {
+    console.log('🚪 Logging out...');
+    // Clear user data
+    localStorage.removeItem('currentUser');
+    localStorage.removeItem('isAuthenticated');
+    // Reload page để reset state (hoặc có thể redirect về login)
+    window.location.reload();
+  };
+
+  // Auto-login với tài khoản mặc định (chỉ để test)
+  // Trong production, comment phần này và uncomment phần check isAuthenticated
+  // if (!isAuthenticated || !currentUser) {
+  //   return <Login onLoginSuccess={handleLoginSuccess} />;
+  // }
+
   return (
     <HashRouter>
       <div className="min-h-screen bg-neutral-950 font-sans text-slate-300">
-        <Sidebar />
-        <Header />
+        <Sidebar onLogout={handleLogout} currentUser={currentUser} />
+        <Header currentUser={currentUser} onLogout={handleLogout} />
 
         <main className="ml-64 pt-24 px-8 pb-12">
           <Routes>
@@ -387,6 +449,7 @@ const AppContent: React.FC = () => {
             <Route path="/technician" element={<TechnicianView />} />
             <Route path="/services" element={<Services />} />
             <Route path="/workflows" element={<Workflows />} />
+            <Route path="/workflows/:id/config" element={<WorkflowConfig />} />
             <Route path="/products" element={<Products />} />
             <Route path="/members" element={<Members />} />
             <Route path="/settings" element={<SettingsPage />} />

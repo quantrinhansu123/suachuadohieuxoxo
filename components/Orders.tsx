@@ -1,11 +1,10 @@
-import React, { useState, useMemo, useRef, useEffect } from 'react';
+import React, { useState, useMemo, useRef, useEffect, useCallback } from 'react';
 import { createPortal } from 'react-dom';
-import { Plus, Search, Table, MoreHorizontal, QrCode, FileText, Image as ImageIcon, Printer, X, CheckSquare, Square, ShoppingBag, Package, Eye, Edit, Trash2, Download, Upload, ArrowLeft, ChevronDown, Check } from 'lucide-react';
-import { Order, OrderStatus, ServiceType, ServiceItem, ServiceCatalogItem, WorkflowDefinition } from '../types';
+import { Plus, Search, Table, MoreHorizontal, QrCode, FileText, Image as ImageIcon, Printer, X, CheckSquare, Square, ShoppingBag, Package, Eye, Edit, Trash2, Download, Upload, ArrowLeft, ChevronDown, Check, Users, ChevronRight, CheckCircle2, Circle, Columns } from 'lucide-react';
+import { Order, OrderStatus, ServiceType, ServiceItem, ServiceCatalogItem, WorkflowDefinition, Member, TodoStep } from '../types';
 import { useAppStore } from '../context';
 import { TableFilter, FilterState, filterByDateRange } from './TableFilter';
-import { db, DB_PATHS } from '../firebase';
-import { ref, onValue, get } from 'firebase/database';
+import { supabase, DB_PATHS } from '../supabase';
 
 // Utility for formatting currency
 const formatCurrency = (amount: number) => {
@@ -171,10 +170,376 @@ const ActionMenu: React.FC<{
   );
 };
 
+// Component to display workflow stages and tasks with assignment
+const WorkflowStagesTasksView: React.FC<{
+  item: ServiceItem;
+  workflows: WorkflowDefinition[];
+  members: Member[];
+  onUpdateTaskAssignment: (taskId: string, assignedTo: string[]) => Promise<void>;
+}> = React.memo(({ item, workflows, members, onUpdateTaskAssignment }) => {
+  const [expandedStages, setExpandedStages] = useState<Set<string>>(new Set());
+  const [taskAssignments, setTaskAssignments] = useState<Record<string, string[]>>({});
+  const [showAssignmentModal, setShowAssignmentModal] = useState<{ taskId: string; taskTitle: string } | null>(null);
+
+  // Memoize current workflow to avoid recalculation - only depend on workflowId, not entire workflows array
+  const currentWorkflow = useMemo(() => {
+    if (!item.workflowId) return null;
+    return workflows.find(w => w.id === item.workflowId) || null;
+  }, [item.workflowId, workflows.length]); // Only re-calculate if workflows array length changes
+  
+  // Memoize members map for fast lookup
+  const membersMap = useMemo(() => {
+    const map = new Map<string, Member>();
+    members.forEach(m => map.set(m.id, m));
+    return map;
+  }, [members.length]); // Only recreate if members count changes
+  
+  // Load task assignments from database - with caching
+  useEffect(() => {
+    // Check cache first
+    if (assignmentsCacheRef.current[item.id]) {
+      setTaskAssignments(assignmentsCacheRef.current[item.id]);
+      return;
+    }
+    
+    let isMounted = true;
+    
+    const loadAssignments = async () => {
+      try {
+        const { data } = await supabase
+          .from(DB_PATHS.SERVICE_ITEMS)
+          .select('phan_cong_tasks')
+          .eq('id', item.id)
+          .single();
+        
+        if (isMounted && data?.phan_cong_tasks) {
+          const assignments = (data.phan_cong_tasks as Array<{ taskId: string; assignedTo: string[] }>).reduce((acc, a) => {
+            acc[a.taskId] = a.assignedTo || [];
+            return acc;
+          }, {} as Record<string, string[]>);
+          
+          // Cache the result
+          assignmentsCacheRef.current[item.id] = assignments;
+          setTaskAssignments(assignments);
+        }
+      } catch (error) {
+        if (isMounted) {
+          console.error('Error loading task assignments:', error);
+        }
+      }
+    };
+    
+    loadAssignments();
+    
+    return () => {
+      isMounted = false;
+    };
+  }, [item.id]);
+
+  // Auto-expand current stage on mount - only when workflow or status changes
+  useEffect(() => {
+    if (currentWorkflow && item.status) {
+      const currentStage = currentWorkflow.stages?.find(s => s.id === item.status);
+      if (currentStage) {
+        setExpandedStages(prev => {
+          if (prev.has(currentStage.id)) return prev;
+          return new Set([currentStage.id]);
+        });
+      }
+    }
+  }, [currentWorkflow?.id, item.status]); // Only depend on workflow ID, not entire object
+
+  // Memoize toggle function
+  const toggleStage = useCallback((stageId: string) => {
+    setExpandedStages(prev => {
+      const newExpanded = new Set(prev);
+      if (newExpanded.has(stageId)) {
+        newExpanded.delete(stageId);
+      } else {
+        newExpanded.add(stageId);
+      }
+      return newExpanded;
+    });
+  }, []);
+
+  // Memoize assignment handler
+  const handleTaskAssignment = useCallback(async (taskId: string, taskTitle: string, memberIds: string[]) => {
+    try {
+      await onUpdateTaskAssignment(taskId, memberIds);
+      const newAssignments = { ...taskAssignments, [taskId]: memberIds };
+      setTaskAssignments(newAssignments);
+      // Update cache
+      if (assignmentsCacheRef.current[item.id]) {
+        assignmentsCacheRef.current[item.id] = newAssignments;
+      }
+      setShowAssignmentModal(null);
+    } catch (error) {
+      console.error('Error updating task assignment:', error);
+    }
+  }, [onUpdateTaskAssignment, taskAssignments, item.id]);
+
+  // Early returns
+  if (!currentWorkflow) {
+    return (
+      <div className="mt-2 p-2 bg-neutral-800/50 rounded border border-neutral-700">
+        <div className="text-xs text-slate-400">
+          <span className="text-slate-500">Chưa có quy trình:</span> Dịch vụ này chưa được gán quy trình hoặc quy trình không tồn tại
+        </div>
+        {item.workflowId && (
+          <div className="text-[10px] text-slate-600 mt-1">
+            WorkflowId: {item.workflowId}
+          </div>
+        )}
+      </div>
+    );
+  }
+
+  if (!currentWorkflow.stages || currentWorkflow.stages.length === 0) {
+    return (
+      <div className="mt-2 text-[10px] text-slate-600 italic">
+        Quy trình "{currentWorkflow.label}" chưa có bước nào được thiết lập
+      </div>
+    );
+  }
+
+  return (
+    <div className="mt-3 space-y-2">
+      <div className="text-xs font-semibold text-slate-300 mb-3 flex items-center justify-between border-b border-neutral-700 pb-2">
+        <div className="flex items-center gap-2">
+          <Columns size={14} className="text-gold-500" />
+          <span className="font-bold">Quy trình: {currentWorkflow.label}</span>
+          <span className="text-[10px] text-slate-500">
+            ({currentWorkflow.stages?.length || 0} bước)
+          </span>
+        </div>
+        {currentWorkflow.stages && currentWorkflow.stages.length > 0 && (
+          <button
+            onClick={() => {
+              if (expandedStages.size === currentWorkflow.stages!.length) {
+                setExpandedStages(new Set());
+              } else {
+                setExpandedStages(new Set(currentWorkflow.stages!.map(s => s.id)));
+              }
+            }}
+            className="text-[10px] text-slate-400 hover:text-slate-200 px-2 py-1 rounded border border-neutral-700 hover:border-gold-500/50 transition-colors"
+          >
+            {expandedStages.size === currentWorkflow.stages!.length ? 'Thu gọn tất cả' : 'Mở tất cả'}
+          </button>
+        )}
+      </div>
+      <div className="space-y-2 max-h-[500px] overflow-y-auto pr-2 border border-neutral-800 rounded-lg p-3 bg-neutral-900/50">
+        {currentWorkflow.stages.map((stage) => {
+          const isExpanded = expandedStages.has(stage.id);
+          const isCurrentStage = item.status === stage.id;
+          
+          return (
+            <div key={stage.id} className="border border-neutral-800 rounded-lg overflow-hidden">
+              {/* Stage Header */}
+              <div 
+                className={`p-2.5 bg-neutral-800/50 cursor-pointer hover:bg-neutral-800 transition-colors ${isCurrentStage ? 'border-l-2 border-gold-500' : ''}`}
+                onClick={() => toggleStage(stage.id)}
+              >
+                <div className="flex items-center justify-between">
+                  <div className="flex items-center gap-2 flex-1">
+                    <ChevronRight 
+                      size={14} 
+                      className={`text-slate-500 transition-transform ${isExpanded ? 'rotate-90' : ''}`} 
+                    />
+                    <span className="text-xs font-medium text-gold-500">Bước {stage.order}</span>
+                    <span className={`text-xs font-semibold ${isCurrentStage ? 'text-gold-400' : 'text-slate-300'}`}>
+                      {stage.name}
+                    </span>
+                    {isCurrentStage && (
+                      <span className="text-[10px] px-1.5 py-0.5 bg-gold-500/20 text-gold-400 rounded border border-gold-500/30">
+                        Đang thực hiện
+                      </span>
+                    )}
+                  </div>
+                  {stage.assignedMembers && stage.assignedMembers.length > 0 && (
+                    <div className="flex items-center gap-1">
+                      <Users size={12} className="text-slate-500" />
+                      <span className="text-[10px] text-slate-500">{stage.assignedMembers.length}</span>
+                    </div>
+                  )}
+                </div>
+              </div>
+
+              {/* Stage Tasks */}
+              {isExpanded && (
+                <div className="p-2 bg-neutral-900 space-y-1.5 border-t border-neutral-800">
+                  {stage.todos && stage.todos.length > 0 ? (
+                    stage.todos.map((task: TodoStep) => {
+                    const assigned = taskAssignments[task.id] || [];
+                    return (
+                      <div key={task.id} className="p-2 bg-neutral-800/50 rounded border border-neutral-700">
+                        <div className="flex items-start justify-between gap-2">
+                          <div className="flex items-start gap-2 flex-1 min-w-0">
+                            {task.completed ? (
+                              <CheckCircle2 size={14} className="text-green-500 mt-0.5 flex-shrink-0" />
+                            ) : (
+                              <Circle size={14} className="text-slate-500 mt-0.5 flex-shrink-0" />
+                            )}
+                            <div className="flex-1 min-w-0">
+                              <div className={`text-xs ${task.completed ? 'text-slate-500 line-through' : 'text-slate-300'}`}>
+                                {task.title}
+                              </div>
+                              {task.description && (
+                                <div className="text-[10px] text-slate-500 mt-0.5">{task.description}</div>
+                              )}
+                              {/* Assigned Members */}
+                              {assigned.length > 0 && (
+                                <div className="flex items-center gap-1 mt-1.5 flex-wrap">
+                                  {assigned.slice(0, 3).map(memberId => {
+                                    const member = membersMap.get(memberId);
+                                    if (!member) return null;
+                                    return (
+                                      <div 
+                                        key={memberId}
+                                        className="flex items-center gap-1 px-1.5 py-0.5 bg-blue-900/20 border border-blue-800/30 rounded text-[10px] text-blue-400"
+                                        title={member.name}
+                                      >
+                                        {member.avatar ? (
+                                          <img src={member.avatar} alt="" className="w-3 h-3 rounded-full" />
+                                        ) : (
+                                          <div className="w-3 h-3 rounded-full bg-blue-700 flex items-center justify-center text-[8px] font-bold">
+                                            {member.name.charAt(0)}
+                                          </div>
+                                        )}
+                                        <span className="truncate max-w-[60px]">{member.name}</span>
+                                      </div>
+                                    );
+                                  })}
+                                  {assigned.length > 3 && (
+                                    <span className="text-[10px] text-slate-500">+{assigned.length - 3}</span>
+                                  )}
+                                </div>
+                              )}
+                            </div>
+                          </div>
+                          <button
+                            onClick={(e) => {
+                              e.stopPropagation();
+                              setShowAssignmentModal({ taskId: task.id, taskTitle: task.title });
+                            }}
+                            className="p-1 hover:bg-neutral-700 rounded text-slate-500 hover:text-slate-300 transition-colors flex-shrink-0"
+                            title="Gán nhân sự"
+                          >
+                            <Users size={12} />
+                          </button>
+                        </div>
+                      </div>
+                    );
+                  })
+                  ) : (
+                    <div className="text-[10px] text-slate-600 italic py-2 text-center">
+                      Chưa có task nào cho bước này
+                    </div>
+                  )}
+                </div>
+              )}
+            </div>
+          );
+        })}
+      </div>
+
+      {/* Assignment Modal */}
+      {showAssignmentModal && (
+        <div className="fixed inset-0 bg-black/80 backdrop-blur-sm z-[100] flex items-center justify-center p-4">
+          <div className="bg-neutral-900 rounded-xl shadow-2xl w-full max-w-md border border-neutral-800">
+            <div className="p-4 border-b border-neutral-800 flex items-center justify-between">
+              <h3 className="font-bold text-slate-200">Gán nhân sự cho task</h3>
+              <button
+                onClick={() => setShowAssignmentModal(null)}
+                className="p-1 hover:bg-neutral-800 rounded transition-colors text-slate-400"
+              >
+                <X size={18} />
+              </button>
+            </div>
+            <div className="p-4">
+              <div className="mb-3">
+                <div className="text-sm font-medium text-slate-300">{showAssignmentModal.taskTitle}</div>
+              </div>
+              <div className="space-y-1 max-h-64 overflow-y-auto">
+                {members.map(member => {
+                  const isSelected = (taskAssignments[showAssignmentModal!.taskId] || []).includes(member.id);
+                  return (
+                    <label
+                      key={member.id}
+                      className="flex items-center gap-2 p-2 bg-neutral-800/50 rounded border border-neutral-700 hover:border-gold-500/50 cursor-pointer transition-colors"
+                    >
+                      <input
+                        type="checkbox"
+                        checked={isSelected}
+                        onChange={(e) => {
+                          const current = taskAssignments[showAssignmentModal!.taskId] || [];
+                          const newAssigned = e.target.checked
+                            ? [...current, member.id]
+                            : current.filter(id => id !== member.id);
+                          setTaskAssignments(prev => ({ ...prev, [showAssignmentModal!.taskId]: newAssigned }));
+                        }}
+                        className="w-4 h-4 text-gold-600 bg-neutral-800 border-neutral-700 rounded focus:ring-gold-500"
+                      />
+                      <div className="flex items-center gap-2 flex-1">
+                        {member.avatar ? (
+                          <img src={member.avatar} alt="" className="w-8 h-8 rounded-full" />
+                        ) : (
+                          <div className="w-8 h-8 rounded-full bg-neutral-700 flex items-center justify-center text-xs font-bold">
+                            {member.name.charAt(0)}
+                          </div>
+                        )}
+                        <div>
+                          <div className="text-sm font-medium text-slate-200">{member.name}</div>
+                          <div className="text-xs text-slate-500">{member.role}</div>
+                        </div>
+                      </div>
+                    </label>
+                  );
+                })}
+              </div>
+            </div>
+            <div className="p-4 border-t border-neutral-800 flex gap-2">
+              <button
+                onClick={() => setShowAssignmentModal(null)}
+                className="flex-1 py-2 px-4 bg-neutral-800 hover:bg-neutral-700 text-slate-300 rounded-lg transition-colors"
+              >
+                Hủy
+              </button>
+              <button
+                onClick={() => handleTaskAssignment(
+                  showAssignmentModal.taskId,
+                  showAssignmentModal.taskTitle,
+                  taskAssignments[showAssignmentModal.taskId] || []
+                )}
+                className="flex-1 py-2 px-4 bg-gold-600 hover:bg-gold-700 text-black font-medium rounded-lg transition-colors"
+              >
+                Lưu
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
+    </div>
+  );
+}, (prevProps, nextProps) => {
+  // Custom comparison for React.memo - only re-render if essential props change
+  if (prevProps.item.id !== nextProps.item.id) return false;
+  if (prevProps.item.workflowId !== nextProps.item.workflowId) return false;
+  if (prevProps.item.status !== nextProps.item.status) return false;
+  if (prevProps.workflows.length !== nextProps.workflows.length) return false;
+  // Check if the specific workflow changed
+  const prevWorkflow = prevProps.workflows.find(w => w.id === prevProps.item.workflowId);
+  const nextWorkflow = nextProps.workflows.find(w => w.id === nextProps.item.workflowId);
+  if (prevWorkflow?.stages?.length !== nextWorkflow?.stages?.length) return false;
+  if (prevProps.members.length !== nextProps.members.length) return false;
+  if (prevProps.onUpdateTaskAssignment !== nextProps.onUpdateTaskAssignment) return false;
+  return true; // Props are equal, skip re-render
+});
+
 export const Orders: React.FC = () => {
   const { orders, addOrder, updateOrder, deleteOrder, customers, products, members } = useAppStore();
   const [services, setServices] = useState<ServiceCatalogItem[]>([]);
   const [workflows, setWorkflows] = useState<WorkflowDefinition[]>([]);
+  const workflowsCacheRef = useRef<{ workflows: WorkflowDefinition[]; timestamp: number } | null>(null);
 
   const [isModalOpen, setIsModalOpen] = useState(false);
   const [isEditModalOpen, setIsEditModalOpen] = useState(false);
@@ -237,33 +602,212 @@ export const Orders: React.FC = () => {
     return { count, revenue, deposit };
   }, [filteredOrders]);
 
-  // Fetch Services & Workflows from Firebase
+  // Fetch Services & Workflows from Supabase
   useEffect(() => {
-    const servicesRef = ref(db, DB_PATHS.SERVICES);
-    const unsubscribeServices = onValue(servicesRef, (snapshot) => {
-      if (snapshot.exists()) {
-        const data = snapshot.val();
-        const list = Object.keys(data).map(key => ({ ...data[key], id: key } as ServiceCatalogItem));
-        setServices(list);
-      } else {
+    const loadServices = async () => {
+      try {
+        const { data, error } = await supabase.from(DB_PATHS.SERVICES).select('*');
+        if (error) {
+          console.error('Error loading services:', error);
+          setServices([]);
+          return;
+        }
+        if (data) {
+          // Map data từ database (tiếng Việt) sang ServiceCatalogItem
+          const mappedServices: ServiceCatalogItem[] = data.map((item: any) => {
+            // Parse workflows từ cac_buoc_quy_trinh JSONB hoặc từ workflows array
+            let workflowsArray: { id: string; order: number }[] = [];
+            if (item.workflows && Array.isArray(item.workflows)) {
+              workflowsArray = item.workflows;
+            } else if (item.cac_buoc_quy_trinh && Array.isArray(item.cac_buoc_quy_trinh)) {
+              // Nếu có cac_buoc_quy_trinh, map thành workflows
+              workflowsArray = item.cac_buoc_quy_trinh.map((wf: any, idx: number) => ({
+                id: wf.id || wf.id_quy_trinh || '',
+                order: wf.order || wf.thu_tu || idx
+              }));
+            }
+
+            return {
+              id: item.id || item.ma_dich_vu || '',
+              name: item.ten_dich_vu || item.name || item.ten || '',
+              category: item.danh_muc || item.category || '',
+              price: Number(item.gia_niem_yet || item.price || item.gia || item.gia_goc || 0),
+              desc: item.mo_ta || item.desc || '',
+              image: item.anh_dich_vu || item.image || item.hinh_anh || item.anh || '',
+              workflowId: item.id_quy_trinh || item.workflowId || '',
+              workflows: workflowsArray
+            };
+          });
+          console.log('✅ Services loaded:', mappedServices.length, mappedServices);
+          setServices(mappedServices);
+        } else {
+          console.log('⚠️ No services data returned');
+          setServices([]);
+        }
+      } catch (error) {
+        console.error('Error loading services:', error);
         setServices([]);
       }
-    });
+    };
 
-    const workflowsRef = ref(db, DB_PATHS.WORKFLOWS);
-    const unsubscribeWorkflows = onValue(workflowsRef, (snapshot) => {
-      if (snapshot.exists()) {
-        const data = snapshot.val();
-        const list = Object.keys(data).map(key => ({ ...data[key], id: key } as WorkflowDefinition));
-        setWorkflows(list);
-      } else {
+    const loadWorkflows = async () => {
+      try {
+        // Check cache first (5 minutes cache)
+        const now = Date.now();
+        const CACHE_DURATION = 5 * 60 * 1000; // 5 minutes
+        if (workflowsCacheRef.current && (now - workflowsCacheRef.current.timestamp) < CACHE_DURATION) {
+          setWorkflows(workflowsCacheRef.current.workflows);
+          return;
+        }
+
+        // Load workflows, stages, and tasks in parallel
+        const [workflowsResult, stagesResult, tasksResult] = await Promise.all([
+          supabase
+            .from(DB_PATHS.WORKFLOWS)
+            .select('id, ten_quy_trinh, mo_ta, phong_ban_phu_trach, loai_ap_dung, vat_tu_can_thiet')
+            .order('ngay_tao', { ascending: false })
+            .limit(100),
+          supabase
+            .from(DB_PATHS.WORKFLOW_STAGES)
+            .select('id, id_quy_trinh, ten_buoc, thu_tu, chi_tiet, tieu_chuan, nhan_vien_duoc_giao')
+            .order('id_quy_trinh, thu_tu', { ascending: true }),
+          supabase
+            .from(DB_PATHS.WORKFLOW_TASKS)
+            .select('id, id_buoc_quy_trinh, ten_task, mo_ta, da_hoan_thanh, thu_tu')
+            .order('thu_tu', { ascending: true })
+        ]);
+
+        if (workflowsResult.error) throw workflowsResult.error;
+        if (stagesResult.error) throw stagesResult.error;
+        
+        const workflowsData = workflowsResult.data || [];
+        const stagesData = stagesResult.data || [];
+        const tasksData = tasksResult.data || [];
+
+        // Group tasks by stage id
+        const tasksByStage: Record<string, TodoStep[]> = tasksData.reduce((acc: Record<string, TodoStep[]>, task: any) => {
+          if (!acc[task.id_buoc_quy_trinh]) {
+            acc[task.id_buoc_quy_trinh] = [];
+          }
+          acc[task.id_buoc_quy_trinh].push({
+            id: task.id,
+            title: task.ten_task,
+            description: task.mo_ta || undefined,
+            completed: task.da_hoan_thanh || false,
+            order: task.thu_tu || 0
+          });
+          return acc;
+        }, {} as Record<string, TodoStep[]>);
+
+        // Group stages by workflow ID
+        const stagesByWorkflow = new Map<string, any[]>();
+        stagesData.forEach((stage: any) => {
+          if (!stagesByWorkflow.has(stage.id_quy_trinh)) {
+            stagesByWorkflow.set(stage.id_quy_trinh, []);
+          }
+          stagesByWorkflow.get(stage.id_quy_trinh)!.push({
+            id: stage.id,
+            name: stage.ten_buoc,
+            order: stage.thu_tu,
+            details: stage.chi_tiet || undefined,
+            standards: stage.tieu_chuan || undefined,
+            todos: tasksByStage[stage.id] || undefined,
+            assignedMembers: stage.nhan_vien_duoc_giao || undefined
+          });
+        });
+
+        // Map từ tên cột tiếng Việt sang interface
+        const departmentMap: Record<string, any> = {
+          'ky_thuat': 'Kỹ Thuật',
+          'spa': 'Spa',
+          'qc': 'QA/QC',
+          'hau_can': 'Hậu Cần'
+        };
+
+        const workflowsList: WorkflowDefinition[] = workflowsData.map((wf: any) => ({
+          id: wf.id,
+          label: wf.ten_quy_trinh || '',
+          description: wf.mo_ta || '',
+          department: departmentMap[wf.phong_ban_phu_trach] || 'Kỹ Thuật',
+          types: wf.loai_ap_dung || [],
+          materials: wf.vat_tu_can_thiet || undefined,
+          stages: stagesByWorkflow.get(wf.id) || undefined,
+          color: 'bg-slate-500'
+        }));
+
+        // Update cache
+        workflowsCacheRef.current = { workflows: workflowsList, timestamp: now };
+        setWorkflows(workflowsList);
+      } catch (error) {
+        console.error('Error loading workflows:', error);
         setWorkflows([]);
       }
-    });
+    };
+
+    loadServices();
+    loadWorkflows();
+
+    const servicesChannel = supabase
+      .channel('orders-services-changes')
+      .on(
+        'postgres_changes',
+        {
+          event: '*',
+          schema: 'public',
+          table: DB_PATHS.SERVICES,
+        },
+        async () => {
+          const { data } = await supabase.from(DB_PATHS.SERVICES).select('*');
+          if (data) {
+            const mappedServices: ServiceCatalogItem[] = data.map((item: any) => {
+              let workflowsArray: { id: string; order: number }[] = [];
+              if (item.workflows && Array.isArray(item.workflows)) {
+                workflowsArray = item.workflows;
+              } else if (item.cac_buoc_quy_trinh && Array.isArray(item.cac_buoc_quy_trinh)) {
+                workflowsArray = item.cac_buoc_quy_trinh.map((wf: any, idx: number) => ({
+                  id: wf.id || wf.id_quy_trinh || '',
+                  order: wf.order || wf.thu_tu || idx
+                }));
+              }
+
+              return {
+                id: item.id || item.ma_dich_vu || '',
+                name: item.ten_dich_vu || item.name || item.ten || '',
+                category: item.danh_muc || item.category || '',
+                price: Number(item.gia_niem_yet || item.price || item.gia || item.gia_goc || 0),
+                desc: item.mo_ta || item.desc || '',
+                image: item.anh_dich_vu || item.image || item.hinh_anh || item.anh || '',
+                workflowId: item.id_quy_trinh || item.workflowId || '',
+                workflows: workflowsArray
+              };
+            });
+            setServices(mappedServices);
+          }
+        }
+      )
+      .subscribe();
+
+    // Only subscribe to workflow changes if needed - can be disabled for better performance
+    // const workflowsChannel = supabase
+    //   .channel('orders-workflows-changes')
+    //   .on(
+    //     'postgres_changes',
+    //     {
+    //       event: '*',
+    //       schema: 'public',
+    //       table: DB_PATHS.WORKFLOWS,
+    //     },
+    //     async () => {
+    //       // Invalidate cache when workflows change
+    //       workflowsCacheRef.current = null;
+    //       loadWorkflows();
+    //     }
+    //   )
+    //   .subscribe();
 
     return () => {
-      unsubscribeServices();
-      unsubscribeWorkflows();
+      supabase.removeChannel(servicesChannel);
+      supabase.removeChannel(workflowsChannel);
     };
   }, []);
 
@@ -344,9 +888,20 @@ export const Orders: React.FC = () => {
         const wf = workflows.find(w => w.id === workflowId);
         if (wf && wf.stages && wf.stages.length > 0) {
           const sortedStages = [...wf.stages].sort((a, b) => a.order - b.order);
-          initialStatus = sortedStages[0].id;
+          initialStatus = sortedStages[0].id; // Use UUID from stage
           initialStageName = sortedStages[0].name;
+          console.log('✅ Set initial status from workflow stage:', {
+            workflowId,
+            workflowName: wf.label,
+            stageId: initialStatus,
+            stageName: initialStageName
+          });
+        } else {
+          console.warn('⚠️ Workflow found but no stages:', workflowId);
         }
+      } else {
+        console.warn('⚠️ No workflowId for service, cannot set proper stage status');
+        // Nếu không có workflow, vẫn dùng 'In Queue' nhưng sẽ có vấn đề khi hiển thị
       }
 
     } else {
@@ -360,8 +915,9 @@ export const Orders: React.FC = () => {
       initialStageName = 'Hoàn Thành';
     }
 
+    // Không tạo ID - sẽ được tạo khi lưu vào database
     const newItem: ServiceItem = {
-      id: `SI-${Date.now()}-${Math.floor(Math.random() * 100)}`,
+      id: '', // Tạm thời để trống, sẽ được cập nhật sau khi tạo
       name: name,
       type: type,
       price: customPrice ? parseInt(customPrice) : itemData.price,
@@ -370,7 +926,7 @@ export const Orders: React.FC = () => {
       beforeImage: image,
       isProduct: selectedItemType === 'PRODUCT',
       serviceId: selectedItemType === 'SERVICE' ? selectedItemId : undefined,
-      workflowId: workflowId,
+      workflowId: workflowId || undefined, // Đảm bảo workflowId được set
       history: [{
         stageId: initialStatus,
         stageName: initialStageName,
@@ -378,6 +934,14 @@ export const Orders: React.FC = () => {
         performedBy: 'Hệ thống'
       }]
     };
+
+    console.log('✅ New item created:', {
+      name: newItem.name,
+      serviceId: newItem.serviceId,
+      workflowId: newItem.workflowId,
+      status: newItem.status,
+      isProduct: newItem.isProduct
+    });
 
     setNewOrderItems([...newOrderItems, newItem]);
     setSelectedItemId('');
@@ -415,24 +979,12 @@ export const Orders: React.FC = () => {
       }
     }
 
-    const orderId = `ORD-${new Date().getFullYear()}-${Date.now().toString().slice(-4)}`;
-    
-    // Update item IDs to format: {orderId}-{serviceId}
-    const itemsWithUpdatedIds = itemsWithAssignment.map(item => {
-      if (item.serviceId) {
-        return {
-          ...item,
-          id: `${orderId}-${item.serviceId}`
-        };
-      }
-      return item;
-    });
-
+    // Không tạo ID - để database tự tạo
     const newOrder: Order = {
-      id: orderId,
+      id: '', // Tạm thời để trống, sẽ được cập nhật sau khi tạo
       customerId: selectedCustomerId,
       customerName: customer?.name || 'Khách lẻ',
-      items: itemsWithUpdatedIds,
+      items: itemsWithAssignment, // Không cần tạo ID cho items - database tự tạo
       totalAmount: totalAmount,
       deposit: 0,
       status: OrderStatus.PENDING,
@@ -496,8 +1048,9 @@ export const Orders: React.FC = () => {
       initialStageName = 'Hoàn Thành';
     }
 
+    // Không tạo ID - sẽ được tạo khi lưu vào database
     const newItem: ServiceItem = {
-      id: `SI-${Date.now()}-${Math.floor(Math.random() * 100)}`,
+      id: '', // Tạm thời để trống, sẽ được cập nhật sau khi tạo
       name: name,
       type: type,
       price: editCustomPrice ? parseInt(editCustomPrice) : itemData.price,
@@ -553,7 +1106,7 @@ export const Orders: React.FC = () => {
     // Clean items to remove undefined values and update IDs to format: {orderId}-{serviceId}
     const cleanedItems = editOrderItems.map(item => {
       // Generate ID as {orderId}-{serviceId} if serviceId exists
-      const itemId = item.serviceId 
+      const itemId = item.serviceId
         ? `${editingOrder.id}-${item.serviceId}`
         : item.id;
 
@@ -703,7 +1256,7 @@ export const Orders: React.FC = () => {
                     {selectedOrderIds.size > 0 && selectedOrderIds.size === orders.length ? <CheckSquare size={18} className="text-gold-500" /> : <Square size={18} />}
                   </button>
                 </th>
-                <th className="p-4 min-w-[120px]">Mã Đơn</th>
+
                 <th className="p-4 min-w-[200px]">Khách Hàng</th>
                 <th className="p-4">Sản Phẩm</th>
                 <th className="p-4 text-right">Tổng Tiền</th>
@@ -722,7 +1275,7 @@ export const Orders: React.FC = () => {
                     <td className="p-4" onClick={(e) => toggleSelectOrder(order.id, e)}>
                       {isSelected ? <CheckSquare size={18} className="text-gold-500" /> : <Square size={18} className="text-neutral-600" />}
                     </td>
-                    <td className="p-4 font-mono text-slate-300 font-bold">{order.id}</td>
+
                     <td className="p-4">
                       <div className="font-bold text-slate-200">{order.customerName}</div>
                       <div className="text-[10px] text-gold-600/80 font-bold mt-0.5 uppercase tracking-wide">
@@ -734,7 +1287,7 @@ export const Orders: React.FC = () => {
                         {(order.items || []).slice(0, 4).map((item, idx) => (
                           <div key={idx} className="w-8 h-8 rounded-full border-2 border-neutral-900 bg-neutral-800 flex items-center justify-center overflow-hidden" title={item.name}>
                             {item.beforeImage ? (
-                              <img src={item.beforeImage} className="w-full h-full object-cover" />
+                              <img src={item.beforeImage || undefined} className="w-full h-full object-cover" alt="" />
                             ) : (
                               <span className="text-[10px] text-slate-400 font-bold">{item.name[0]}</span>
                             )}
@@ -813,7 +1366,7 @@ export const Orders: React.FC = () => {
                       return (
                         <div key={item.id} className="bg-neutral-900 p-4 rounded-lg border border-neutral-800 shadow-sm flex gap-4">
                           <div className="w-20 h-20 bg-neutral-800 rounded-md overflow-hidden flex-shrink-0 relative group">
-                            {item.beforeImage ? (
+                            {item.beforeImage && item.beforeImage.trim() ? (
                               <img src={item.beforeImage} className="w-full h-full object-cover opacity-80 group-hover:opacity-100 transition-opacity" alt="Before" />
                             ) : (
                               <div className="w-full h-full flex items-center justify-center text-slate-600">No Img</div>
@@ -838,46 +1391,18 @@ export const Orders: React.FC = () => {
                               <span>{item.id}</span>
                             </div>
                             {!item.isProduct && item.serviceId && (
-                              <>
-                                <div className="mt-2 text-[10px] text-slate-600 italic">
-                                  Đã trừ kho theo định mức quy trình
-                                </div>
-                                {(() => {
-                                  const service = services.find(s => s.id === item.serviceId);
-                                  if (service && service.workflows && Array.isArray(service.workflows) && service.workflows.length > 0) {
-                                    const allWorkflows = service.workflows
-                                      .map(wf => {
-                                        const wfDef = workflows.find(w => w.id === wf.id);
-                                        return wfDef ? { id: wfDef.id, label: wfDef.label, order: wf.order, isCurrent: wf.id === item.workflowId } : null;
-                                      })
-                                      .filter(w => w !== null)
-                                      .sort((a, b) => (a?.order || 0) - (b?.order || 0));
-                                    
-                                    return (
-                                      <div className="mt-2 space-y-1">
-                                        <div className="text-[10px] text-slate-500 font-semibold uppercase">Tất cả quy trình:</div>
-                                        {allWorkflows.map((wf, idx) => (
-                                          <div key={wf?.id || idx} className={`text-[10px] ${wf?.isCurrent ? 'text-gold-500 font-bold' : 'text-blue-400'}`}>
-                                            {wf?.isCurrent && '→ '}
-                                            {wf?.order}. {wf?.label}
-                                            {wf?.isCurrent && ' (Đang thực hiện)'}
-                                          </div>
-                                        ))}
-                                      </div>
-                                    );
+                              <WorkflowStagesTasksView
+                                item={item}
+                                workflows={workflows}
+                                members={members || []}
+                                onUpdateTaskAssignment={async (taskId: string, assignedTo: string[]) => {
+                                  try {
+                                    await handleUpdateTaskAssignment(item.id, selectedOrder?.id || '', taskId, assignedTo);
+                                  } catch (error) {
+                                    alert('Lỗi khi cập nhật phân công: ' + (error as Error).message);
                                   }
-                                  // Fallback: show current workflow if no service workflows
-                                  if (item.workflowId) {
-                                    const currentWf = workflows.find(w => w.id === item.workflowId);
-                                    return (
-                                      <div className="mt-1 text-[10px] text-blue-500">
-                                        Quy trình: {currentWf?.label || 'Unknown'}
-                                      </div>
-                                    );
-                                  }
-                                  return null;
-                                })()}
-                              </>
+                                }}
+                              />
                             )}
                             {item.workflowId && !item.serviceId && (
                               <div className="mt-1 text-[10px] text-blue-500">
@@ -1087,14 +1612,26 @@ export const Orders: React.FC = () => {
                           setSelectedItemId(e.target.value);
                           const list = selectedItemType === 'SERVICE' ? services : products;
                           const item = list.find(i => i.id === e.target.value);
-                          if (item) setCustomPrice(item.price.toString());
+                          if (item) {
+                            console.log('✅ Selected item:', item);
+                            setCustomPrice(item.price.toString());
+                          }
                         }}
                       >
                         <option value="">-- Chọn --</option>
-                        {selectedItemType === 'SERVICE'
-                          ? services.map(s => <option key={s.id} value={s.id}>{s.name} (Giá gốc: {s.price.toLocaleString()})</option>)
-                          : products.map(p => <option key={p.id} value={p.id}>{p.name} (Tồn: {formatNumber(p.stock)})</option>)
-                        }
+                        {selectedItemType === 'SERVICE' ? (
+                          services.length > 0 ? (
+                            services.map(s => (
+                              <option key={s.id} value={s.id}>
+                                {s.name} (Giá gốc: {(s.price || 0).toLocaleString()} ₫)
+                              </option>
+                            ))
+                          ) : (
+                            <option value="" disabled>Không có dịch vụ nào ({services.length})</option>
+                          )
+                        ) : (
+                          products.map(p => <option key={p.id} value={p.id}>{p.name} (Tồn: {formatNumber(p.stock)})</option>)
+                        )}
                       </select>
                     </div>
                     <div className="w-40">
@@ -1247,7 +1784,7 @@ export const Orders: React.FC = () => {
                       >
                         <option value="">-- Chọn --</option>
                         {editSelectedItemType === 'SERVICE'
-                          ? services.map(s => <option key={s.id} value={s.id}>{s.name} (Giá gốc: {s.price.toLocaleString()})</option>)
+                          ? services.map(s => <option key={s.id} value={s.id}>{s.name} (Giá gốc: {(s.price || 0).toLocaleString()})</option>)
                           : products.map(p => <option key={p.id} value={p.id}>{p.name} (Tồn: {formatNumber(p.stock)})</option>)
                         }
                       </select>
@@ -1277,7 +1814,7 @@ export const Orders: React.FC = () => {
                   {editOrderItems.map((item, idx) => {
                     const service = item.serviceId ? services.find(s => s.id === item.serviceId) : null;
                     const workflow = item.workflowId ? workflows.find(w => w.id === item.workflowId) : null;
-                    
+
                     return (
                       <div key={idx} className="p-3 bg-neutral-800/50 rounded-lg border border-neutral-700 text-sm">
                         <div className="flex justify-between items-center">
@@ -1297,26 +1834,59 @@ export const Orders: React.FC = () => {
                             </button>
                           </div>
                         </div>
-                        
-                        {/* Hiển thị thông tin quy trình đã chọn */}
-                        {!item.isProduct && (
-                          <div className="mt-2 pt-2 border-t border-neutral-700 space-y-1">
-                            {item.serviceId && service && (
-                              <div className="text-xs text-slate-400">
-                                <span className="text-slate-500">Dịch vụ:</span> {service.name}
-                              </div>
-                            )}
-                            {item.workflowId && workflow && (
-                              <div className="text-xs text-blue-400">
-                                <span className="text-slate-500">Quy trình:</span> {workflow.label}
-                              </div>
-                            )}
-                            {item.status && (
-                              <div className="text-xs text-slate-400">
-                                <span className="text-slate-500">Trạng thái:</span> {item.status}
-                              </div>
-                            )}
-                          </div>
+
+                        {/* Hiển thị workflow stages và tasks với gán nhân sự */}
+                        {!item.isProduct && item.serviceId && (
+                          <WorkflowStagesTasksView
+                            item={item}
+                            workflows={workflows}
+                            members={members || []}
+                            onUpdateTaskAssignment={async (taskId: string, assignedTo: string[]) => {
+                              // Update task assignment in database
+                              try {
+                                const { data: currentItem } = await supabase
+                                  .from(DB_PATHS.SERVICE_ITEMS)
+                                  .select('phan_cong_tasks')
+                                  .eq('id', item.id)
+                                  .single();
+
+                                const currentAssignments = (currentItem?.phan_cong_tasks || []) as Array<{ taskId: string; assignedTo: string[]; completed: boolean }>;
+                                const existingIndex = currentAssignments.findIndex(a => a.taskId === taskId);
+                                
+                                let newAssignments;
+                                if (existingIndex >= 0) {
+                                  newAssignments = [...currentAssignments];
+                                  newAssignments[existingIndex] = {
+                                    ...newAssignments[existingIndex],
+                                    assignedTo
+                                  };
+                                } else {
+                                  newAssignments = [
+                                    ...currentAssignments,
+                                    { taskId, assignedTo, completed: false }
+                                  ];
+                                }
+
+                                const { error } = await supabase
+                                  .from(DB_PATHS.SERVICE_ITEMS)
+                                  .update({ phan_cong_tasks: newAssignments })
+                                  .eq('id', item.id);
+
+                                if (error) throw error;
+                                
+                                // Update local state
+                                const updatedItems = editOrderItems.map(it => 
+                                  it.id === item.id 
+                                    ? { ...it } // Keep item as is, component will reload assignments
+                                    : it
+                                );
+                                setEditOrderItems(updatedItems);
+                              } catch (error) {
+                                console.error('Error updating task assignment:', error);
+                                alert('Lỗi khi cập nhật phân công: ' + (error as Error).message);
+                              }
+                            }}
+                          />
                         )}
                       </div>
                     );

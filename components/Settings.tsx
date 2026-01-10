@@ -4,8 +4,7 @@ import {
   Palette, Smartphone, Mail, Globe, MapPin, Shield,
   Database, RefreshCw
 } from 'lucide-react';
-import { ref, set } from 'firebase/database';
-import { db, DB_PATHS } from '../firebase';
+import { supabase, DB_PATHS } from '../supabase';
 import {
   DEFAULT_COMPANY_CONFIG, MOCK_ROLES, MOCK_SALARIES,
   MOCK_ORDERS, MOCK_INVENTORY, MOCK_CUSTOMERS,
@@ -31,8 +30,8 @@ export const Settings: React.FC = () => {
       // Update company config
       const updatedCompany = { ...companyInfo, themeColor };
 
-      // Save to Firebase (or local storage for now)
-      // await set(ref(db, DB_PATHS.SETTINGS), { company: updatedCompany, roles, salaries });
+      // Save to Supabase (or local storage for now)
+      // await supabase.from(DB_PATHS.SETTINGS).upsert({ company: updatedCompany, roles, salaries });
 
       // Simulate save
       await new Promise(resolve => setTimeout(resolve, 1000));
@@ -73,31 +72,45 @@ export const Settings: React.FC = () => {
     setIsSeeding(true);
     try {
       // 1. Seed Orders
-      const ordersMap = MOCK_ORDERS.reduce((acc, order) => ({ ...acc, [order.id]: order }), {});
-      await set(ref(db, DB_PATHS.ORDERS), ordersMap);
+      const { error: ordersError } = await supabase
+        .from(DB_PATHS.ORDERS)
+        .upsert(MOCK_ORDERS, { onConflict: 'id' });
+      if (ordersError) throw ordersError;
 
       // 2. Seed Inventory
-      const invMap = MOCK_INVENTORY.reduce((acc, item) => ({ ...acc, [item.id]: item }), {});
-      await set(ref(db, DB_PATHS.INVENTORY), invMap);
+      const { error: invError } = await supabase
+        .from(DB_PATHS.INVENTORY)
+        .upsert(MOCK_INVENTORY, { onConflict: 'id' });
+      if (invError) throw invError;
 
       // 3. Seed Customers
-      const custMap = MOCK_CUSTOMERS.reduce((acc, item) => ({ ...acc, [item.id]: item }), {});
-      await set(ref(db, DB_PATHS.CUSTOMERS), custMap);
+      const { error: custError } = await supabase
+        .from(DB_PATHS.CUSTOMERS)
+        .upsert(MOCK_CUSTOMERS, { onConflict: 'id' });
+      if (custError) throw custError;
 
       // 4. Seed Services
-      const svcMap = SERVICE_CATALOG.reduce((acc, item) => ({ ...acc, [item.id]: item }), {});
-      await set(ref(db, DB_PATHS.SERVICES), svcMap);
+      const { error: svcError } = await supabase
+        .from(DB_PATHS.SERVICES)
+        .upsert(SERVICE_CATALOG, { onConflict: 'id' });
+      if (svcError) throw svcError;
 
       // 5. Seed Products
-      const prodMap = MOCK_PRODUCTS.reduce((acc, item) => ({ ...acc, [item.id]: item }), {});
-      await set(ref(db, DB_PATHS.PRODUCTS), prodMap);
+      const { error: prodError } = await supabase
+        .from(DB_PATHS.PRODUCTS)
+        .upsert(MOCK_PRODUCTS, { onConflict: 'id' });
+      if (prodError) throw prodError;
 
       // 6. Seed Workflows & Members
-      const wfMap = MOCK_WORKFLOWS.reduce((acc, item) => ({ ...acc, [item.id]: item }), {});
-      await set(ref(db, DB_PATHS.WORKFLOWS), wfMap);
+      const { error: wfError } = await supabase
+        .from(DB_PATHS.WORKFLOWS)
+        .upsert(MOCK_WORKFLOWS, { onConflict: 'id' });
+      if (wfError) throw wfError;
 
-      const memMap = MOCK_MEMBERS.reduce((acc, item) => ({ ...acc, [item.id]: item }), {});
-      await set(ref(db, DB_PATHS.MEMBERS), memMap);
+      const { error: memError } = await supabase
+        .from(DB_PATHS.MEMBERS)
+        .upsert(MOCK_MEMBERS, { onConflict: 'id' });
+      if (memError) throw memError;
 
       alert("Đã khởi tạo Database thành công với tên bảng Tiếng Việt!");
     } catch (error) {
@@ -486,7 +499,7 @@ export const Settings: React.FC = () => {
               <div className="flex items-center gap-3 mb-6 pb-4 border-b border-neutral-800">
                 <Database size={24} className="text-gold-500" />
                 <div>
-                  <h3 className="text-lg font-bold text-slate-200">Quản Lý Database (Firebase)</h3>
+                  <h3 className="text-lg font-bold text-slate-200">Quản Lý Database (Supabase)</h3>
                   <p className="text-sm text-slate-500">Cấu hình kết nối và dữ liệu mẫu.</p>
                 </div>
               </div>
@@ -494,7 +507,7 @@ export const Settings: React.FC = () => {
               <div className="bg-blue-900/10 border border-blue-900/30 rounded-lg p-4 mb-6">
                 <h4 className="font-bold text-blue-400 mb-2">Trạng thái kết nối</h4>
                 <div className="text-sm text-slate-300">
-                  <p>URL: <span className="font-mono text-slate-400">https://xoxo-b2c0d-default-rtdb.asia-southeast1.firebasedatabase.app/</span></p>
+                  <p>Database: <span className="font-mono text-slate-400">Supabase PostgreSQL</span></p>
                   <p className="mt-1 flex items-center gap-2">
                     <span className="w-2 h-2 bg-emerald-500 rounded-full animate-pulse"></span>
                     Đang kết nối Realtime

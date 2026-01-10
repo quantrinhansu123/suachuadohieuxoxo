@@ -1,8 +1,7 @@
-import React, { useState } from 'react';
+import React, { useState, useEffect } from 'react';
 import { Edit2, X, Info, CheckCircle2, Circle, Plus } from 'lucide-react';
 import { WorkflowDefinition, TodoStep } from '../types';
-import { ref, update } from 'firebase/database';
-import { db, DB_PATHS } from '../firebase';
+import { supabase, DB_TABLES } from '../supabase';
 
 interface EditStageTasksModalProps {
     stageId: string;
@@ -18,72 +17,299 @@ export const EditStageTasksModal: React.FC<EditStageTasksModalProps> = ({
     onClose
 }) => {
     const stage = currentWorkflow?.stages?.find(s => s.id === stageId);
-    const [stageTasks, setStageTasks] = useState<TodoStep[]>(stage?.todos || []);
+    const [stageTasks, setStageTasks] = useState<TodoStep[]>([]);
     const [newTaskTitle, setNewTaskTitle] = useState('');
     const [isAdding, setIsAdding] = useState(false);
     const [isSaving, setIsSaving] = useState(false);
+    const [isLoading, setIsLoading] = useState(true);
 
-    const handleAddTask = async () => {
-        if (!newTaskTitle.trim() || !currentWorkflow || !stage) return;
-
-        const newTask: TodoStep = {
-            id: `todo-${Date.now()}`,
-            title: newTaskTitle.trim(),
-            completed: false,
-            order: stageTasks.length
-        };
-
-        const updatedTasks = [...stageTasks, newTask];
-        setStageTasks(updatedTasks);
-        setNewTaskTitle('');
-        setIsAdding(false);
-
-        // Save to Firebase
+    // Load tasks từ bảng cac_task_quy_trinh
+    const loadTasks = React.useCallback(async () => {
+        if (!stageId) {
+            console.log('No stageId provided');
+            return;
+        }
+        
         try {
-            setIsSaving(true);
-            const updatedStages = currentWorkflow.stages?.map(s =>
-                s.id === stageId ? { ...s, todos: updatedTasks } : s
-            );
+            setIsLoading(true);
+            console.log('🔄 Loading tasks for stageId:', stageId);
+            console.log('Table name:', DB_TABLES.WORKFLOW_TASKS);
+            
+            // First, verify the stage exists in database
+            const { data: stageData, error: stageError } = await supabase
+                .from(DB_TABLES.WORKFLOW_STAGES)
+                .select('id, ten_buoc')
+                .eq('id', stageId)
+                .single();
+            
+            if (stageError || !stageData) {
+                console.error('Stage not found in database:', stageError);
+                console.log('StageId:', stageId);
+                const { data: allStages } = await supabase.from(DB_TABLES.WORKFLOW_STAGES).select('id, ten_buoc');
+                console.log('Available stages:', allStages);
+            } else {
+                console.log('✅ Stage found in database:', stageData);
+            }
+            
+            const { data, error } = await supabase
+                .from(DB_TABLES.WORKFLOW_TASKS)
+                .select('*')
+                .eq('id_buoc_quy_trinh', stageId)
+                .order('thu_tu', { ascending: true });
 
-            await update(ref(db, `${DB_PATHS.WORKFLOWS}/${currentWorkflow.id}`), {
-                stages: updatedStages
+            if (error) {
+                console.error('❌ Error loading tasks:', error);
+                console.error('Error details:', {
+                    message: error.message,
+                    details: error.details,
+                    hint: error.hint,
+                    code: error.code
+                });
+                throw error;
+            }
+
+            console.log('✅ Tasks loaded from database:', data);
+            console.log('📊 Total tasks:', data?.length || 0);
+
+            // Map từ database format sang TodoStep format
+            const tasks: TodoStep[] = (data || []).map((task: any) => ({
+                id: task.id,
+                title: task.ten_task,
+                description: task.mo_ta || undefined,
+                completed: task.da_hoan_thanh || false,
+                order: task.thu_tu || 0
+            }));
+
+            setStageTasks(tasks);
+            console.log('✅ Tasks state updated:', tasks.length, 'tasks');
+        } catch (error) {
+            console.error('❌ Error loading tasks:', error);
+            // Fallback to stage.todos nếu có
+            setStageTasks(stage?.todos || []);
+        } finally {
+            setIsLoading(false);
+        }
+    }, [stageId, stage]);
+
+    useEffect(() => {
+        loadTasks();
+
+        // Subscribe to realtime changes
+        const channel = supabase
+            .channel(`tasks-${stageId}`)
+            .on(
+                'postgres_changes',
+                {
+                    event: '*', // INSERT, UPDATE, DELETE
+                    schema: 'public',
+                    table: DB_TABLES.WORKFLOW_TASKS,
+                    filter: `id_buoc_quy_trinh=eq.${stageId}`
+                },
+                (payload) => {
+                    console.log('🔔 Realtime change received:', payload);
+                    console.log('Event type:', payload.eventType);
+                    console.log('New record:', payload.new);
+                    console.log('Old record:', payload.old);
+                    
+                    // Reload tasks when there's a change
+                    console.log('🔄 Reloading tasks due to realtime change...');
+                    loadTasks();
+                }
+            )
+            .subscribe((status) => {
+                console.log('📡 Realtime subscription status:', status);
+                if (status === 'SUBSCRIBED') {
+                    console.log('✅ Subscribed to realtime changes for tasks');
+                } else if (status === 'CHANNEL_ERROR') {
+                    console.error('❌ Realtime subscription error');
+                } else if (status === 'TIMED_OUT') {
+                    console.warn('⏱️ Realtime subscription timed out');
+                } else if (status === 'CLOSED') {
+                    console.warn('🔒 Realtime subscription closed');
+                }
             });
 
-            console.log('Task added successfully!');
-        } catch (error) {
-            console.error('Error saving task:', error);
-            alert('Lỗi khi lưu task. Vui lòng thử lại.');
-            // Rollback
-            setStageTasks(stageTasks.filter(t => t.id !== newTask.id));
+        // Cleanup subscription on unmount
+        return () => {
+            console.log('🔌 Unsubscribing from realtime changes');
+            supabase.removeChannel(channel);
+        };
+    }, [stageId, stage, loadTasks]);
+
+    const handleAddTask = async () => {
+        if (!newTaskTitle.trim() || !stageId) {
+            alert('Vui lòng nhập tên task!');
+            return;
+        }
+
+        try {
+            setIsSaving(true);
+            
+            console.log('=== INSERTING TASK ===');
+            console.log('Table:', DB_TABLES.WORKFLOW_TASKS);
+            console.log('Stage ID:', stageId);
+            console.log('Stage ID type:', typeof stageId);
+            console.log('Stage ID length:', stageId?.length);
+            console.log('Task title:', newTaskTitle.trim());
+            console.log('Current tasks count:', stageTasks.length);
+            
+            // Kiểm tra xem stageId có tồn tại trong database không
+            const { data: stageCheck, error: stageCheckError } = await supabase
+                .from(DB_TABLES.WORKFLOW_STAGES)
+                .select('id, ten_buoc')
+                .eq('id', stageId)
+                .single();
+            
+            if (stageCheckError || !stageCheck) {
+                console.error('Stage not found!', stageCheckError);
+                alert(`Lỗi: Không tìm thấy stage với ID: ${stageId}\n\nVui lòng kiểm tra lại stage ID.`);
+                return;
+            }
+            
+            console.log('Stage found:', stageCheck);
+            
+            // Insert vào bảng cac_task_quy_trinh
+            const insertData = {
+                id_buoc_quy_trinh: stageId,
+                ten_task: newTaskTitle.trim(),
+                mo_ta: null,
+                thu_tu: stageTasks.length,
+                da_hoan_thanh: false
+            };
+            
+            console.log('Insert data:', insertData);
+            
+            let data, error;
+            try {
+                const result = await supabase
+                    .from(DB_TABLES.WORKFLOW_TASKS)
+                    .insert(insertData)
+                    .select()
+                    .single();
+                data = result.data;
+                error = result.error;
+            } catch (fetchError: any) {
+                // Bắt lỗi network/fetch
+                console.error('=== NETWORK/FETCH ERROR ===');
+                console.error('Fetch error:', fetchError);
+                console.error('Error name:', fetchError?.name);
+                console.error('Error message:', fetchError?.message);
+                console.error('Error stack:', fetchError?.stack);
+                
+                const networkErrorMsg = `Lỗi kết nối đến Supabase:\n\n` +
+                    `Message: ${fetchError?.message || 'Failed to fetch'}\n` +
+                    `Type: ${fetchError?.name || 'NetworkError'}\n\n` +
+                    `Có thể do:\n` +
+                    `- Mất kết nối internet\n` +
+                    `- Supabase service đang down\n` +
+                    `- Firewall/Proxy chặn kết nối\n` +
+                    `- URL Supabase không đúng\n\n` +
+                    `Vui lòng:\n` +
+                    `1. Kiểm tra kết nối internet\n` +
+                    `2. Thử lại sau vài giây\n` +
+                    `3. Kiểm tra Supabase Dashboard\n` +
+                    `4. Kiểm tra console để xem chi tiết`;
+                
+                alert(networkErrorMsg);
+                throw fetchError;
+            }
+
+            if (error) {
+                console.error('=== SUPABASE INSERT ERROR ===');
+                console.error('Error object:', error);
+                console.error('Error message:', error.message);
+                console.error('Error details:', error.details);
+                console.error('Error hint:', error.hint);
+                console.error('Error code:', error.code);
+                
+                const errorMsg = `Lỗi khi lưu task vào database:\n\n` +
+                    `Message: ${error.message || 'Không có thông báo'}\n` +
+                    `Code: ${error.code || 'N/A'}\n` +
+                    `${error.details ? `Details: ${error.details}\n` : ''}` +
+                    `${error.hint ? `Hint: ${error.hint}\n` : ''}` +
+                    `\nStage ID: ${stageId}\n` +
+                    `Task title: ${newTaskTitle.trim()}`;
+                
+                alert(errorMsg);
+                throw error;
+            }
+
+            console.log('=== TASK INSERTED SUCCESSFULLY ===');
+            console.log('Inserted data:', data);
+            console.log('Task ID:', data.id);
+            console.log('Stage ID:', data.id_buoc_quy_trinh);
+            console.log('Task name:', data.ten_task);
+
+            // Verify task was actually saved by querying it back
+            const { data: verifyData, error: verifyError } = await supabase
+                .from(DB_TABLES.WORKFLOW_TASKS)
+                .select('*')
+                .eq('id', data.id)
+                .single();
+            
+            if (verifyError || !verifyData) {
+                console.error('⚠️ WARNING: Task was inserted but cannot be verified!', verifyError);
+                alert(`⚠️ Cảnh báo: Task đã được insert nhưng không thể verify lại.\n\nVui lòng kiểm tra database.`);
+            } else {
+                console.log('✅ Task verified in database:', verifyData);
+            }
+
+            // Reload tasks từ database để đảm bảo đồng bộ
+            console.log('🔄 Reloading tasks from database...');
+            await loadTasks();
+            
+            setNewTaskTitle('');
+            setIsAdding(false);
+
+            console.log('✅ Task added and reloaded successfully!');
+            alert(`Đã thêm task thành công!\n\nTask ID: ${data.id}\nStage ID: ${data.id_buoc_quy_trinh}`);
+        } catch (error: any) {
+            console.error('=== GENERAL ERROR ===');
+            console.error('Error:', error);
+            const errorMessage = error?.message || String(error);
+            alert(`Lỗi không xác định:\n${errorMessage}`);
         } finally {
             setIsSaving(false);
         }
     };
 
     const handleDeleteTask = async (taskId: string) => {
-        if (!currentWorkflow || !stage) return;
         if (!window.confirm('Bạn có chắc muốn xóa task này?')) return;
 
-        const updatedTasks = stageTasks.filter(t => t.id !== taskId).map((t, i) => ({ ...t, order: i }));
+        const taskToDelete = stageTasks.find(t => t.id === taskId);
+        if (!taskToDelete) return;
+
+        // Optimistic update
+        const updatedTasks = stageTasks.filter(t => t.id !== taskId);
         setStageTasks(updatedTasks);
 
-        // Save to Firebase
         try {
             setIsSaving(true);
-            const updatedStages = currentWorkflow.stages?.map(s =>
-                s.id === stageId ? { ...s, todos: updatedTasks } : s
+            
+            // Delete từ bảng cac_task_quy_trinh
+            const { error } = await supabase
+                .from(DB_TABLES.WORKFLOW_TASKS)
+                .delete()
+                .eq('id', taskId);
+
+            if (error) throw error;
+
+            // Cập nhật lại thứ tự các task còn lại
+            const updatePromises = updatedTasks.map((task, index) =>
+                supabase
+                    .from(DB_TABLES.WORKFLOW_TASKS)
+                    .update({ thu_tu: index })
+                    .eq('id', task.id)
             );
 
-            await update(ref(db, `${DB_PATHS.WORKFLOWS}/${currentWorkflow.id}`), {
-                stages: updatedStages
-            });
+            await Promise.all(updatePromises);
 
             console.log('Task deleted successfully!');
         } catch (error) {
             console.error('Error deleting task:', error);
             alert('Lỗi khi xóa task. Vui lòng thử lại.');
-            // Rollback - restore the task
-            setStageTasks(stage.todos || []);
+            // Rollback
+            setStageTasks(stageTasks);
         } finally {
             setIsSaving(false);
         }
@@ -114,7 +340,11 @@ export const EditStageTasksModal: React.FC<EditStageTasksModalProps> = ({
 
                 {/* Body */}
                 <div className="p-6 max-h-[60vh] overflow-y-auto">
-                    {!currentWorkflow || !stage ? (
+                    {isLoading ? (
+                        <div className="text-center py-8 text-slate-500">
+                            <p>Đang tải tasks...</p>
+                        </div>
+                    ) : !currentWorkflow || !stage ? (
                         <div className="text-center py-8 text-slate-500">
                             <Info size={48} className="mx-auto mb-3 opacity-20" />
                             <p>Không tìm thấy thông tin quy trình hoặc bước này.</p>

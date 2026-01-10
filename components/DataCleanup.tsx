@@ -1,6 +1,5 @@
 import React, { useState } from 'react';
-import { ref, remove, get } from 'firebase/database';
-import { db, DB_PATHS } from '../firebase';
+import { supabase, DB_PATHS } from '../supabase';
 import { Trash2, AlertTriangle, RefreshCw } from 'lucide-react';
 
 export const DataCleanup: React.FC = () => {
@@ -21,14 +20,15 @@ export const DataCleanup: React.FC = () => {
             setDeleteType('workflows');
 
             // Get current data first
-            const snapshot = await get(ref(db, DB_PATHS.WORKFLOWS));
-            const count = snapshot.exists() ? Object.keys(snapshot.val()).length : 0;
+            const { data, count } = await supabase
+                .from(DB_PATHS.WORKFLOWS)
+                .select('*', { count: 'exact', head: true });
 
             // Delete all workflows
-            await remove(ref(db, DB_PATHS.WORKFLOWS));
+            await supabase.from(DB_PATHS.WORKFLOWS).delete().neq('id', '');
 
-            alert(`✅ Đã xóa thành công ${count} quy trình!`);
-            console.log(`Deleted ${count} workflows from Firebase`);
+            alert(`✅ Đã xóa thành công ${count || 0} quy trình!`);
+            console.log(`Deleted ${count || 0} workflows from Supabase`);
         } catch (error) {
             console.error('Error deleting workflows:', error);
             alert('❌ Lỗi khi xóa dữ liệu: ' + error);
@@ -52,14 +52,15 @@ export const DataCleanup: React.FC = () => {
             setDeleteType('orders');
 
             // Get current data first
-            const snapshot = await get(ref(db, DB_PATHS.ORDERS));
-            const count = snapshot.exists() ? Object.keys(snapshot.val()).length : 0;
+            const { count } = await supabase
+                .from(DB_PATHS.ORDERS)
+                .select('*', { count: 'exact', head: true });
 
             // Delete all orders
-            await remove(ref(db, DB_PATHS.ORDERS));
+            await supabase.from(DB_PATHS.ORDERS).delete().neq('id', '');
 
-            alert(`✅ Đã xóa thành công ${count} đơn hàng!`);
-            console.log(`Deleted ${count} orders from Firebase`);
+            alert(`✅ Đã xóa thành công ${count || 0} đơn hàng!`);
+            console.log(`Deleted ${count || 0} orders from Supabase`);
         } catch (error) {
             console.error('Error deleting orders:', error);
             alert('❌ Lỗi khi xóa dữ liệu: ' + error);
@@ -85,17 +86,19 @@ export const DataCleanup: React.FC = () => {
             setDeleteType('all');
 
             // Delete workflows
-            const workflowsSnapshot = await get(ref(db, DB_PATHS.WORKFLOWS));
-            const workflowsCount = workflowsSnapshot.exists() ? Object.keys(workflowsSnapshot.val()).length : 0;
-            await remove(ref(db, DB_PATHS.WORKFLOWS));
+            const { count: workflowsCount } = await supabase
+                .from(DB_PATHS.WORKFLOWS)
+                .select('*', { count: 'exact', head: true });
+            await supabase.from(DB_PATHS.WORKFLOWS).delete().neq('id', '');
 
             // Delete orders
-            const ordersSnapshot = await get(ref(db, DB_PATHS.ORDERS));
-            const ordersCount = ordersSnapshot.exists() ? Object.keys(ordersSnapshot.val()).length : 0;
-            await remove(ref(db, DB_PATHS.ORDERS));
+            const { count: ordersCount } = await supabase
+                .from(DB_PATHS.ORDERS)
+                .select('*', { count: 'exact', head: true });
+            await supabase.from(DB_PATHS.ORDERS).delete().neq('id', '');
 
-            alert(`✅ Đã xóa thành công:\n- ${workflowsCount} quy trình\n- ${ordersCount} đơn hàng`);
-            console.log(`Deleted all data: ${workflowsCount} workflows, ${ordersCount} orders`);
+            alert(`✅ Đã xóa thành công:\n- ${workflowsCount || 0} quy trình\n- ${ordersCount || 0} đơn hàng`);
+            console.log(`Deleted all data: ${workflowsCount || 0} workflows, ${ordersCount || 0} orders`);
         } catch (error) {
             console.error('Error deleting all data:', error);
             alert('❌ Lỗi khi xóa dữ liệu: ' + error);
