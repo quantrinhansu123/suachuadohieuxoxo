@@ -373,11 +373,11 @@ export const Settings: React.FC = () => {
                       <div className="grid grid-cols-1 md:grid-cols-2 gap-6 mb-6">
                         <div>
                           <label className="text-xs font-semibold text-slate-500 uppercase">Lương Cơ Bản</label>
-                          <div className="text-lg font-mono font-medium text-slate-200">{salary.baseSalary.toLocaleString()} ₫</div>
+                          <div className="text-lg font-mono font-medium text-slate-200">{salary.baseSalary.toLocaleString('vi-VN')} ₫</div>
                         </div>
                         <div>
                           <label className="text-xs font-semibold text-slate-500 uppercase">Phụ Cấp</label>
-                          <div className="text-lg font-mono font-medium text-slate-200">{salary.allowance.toLocaleString()} ₫</div>
+                          <div className="text-lg font-mono font-medium text-slate-200">{salary.allowance.toLocaleString('vi-VN')} ₫</div>
                         </div>
                       </div>
 

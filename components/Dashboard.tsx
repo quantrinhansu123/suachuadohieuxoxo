@@ -95,7 +95,7 @@ export const Dashboard: React.FC = () => {
                 <Tooltip 
                   contentStyle={{ backgroundColor: '#171717', borderRadius: '8px', border: '1px solid #333', color: '#fff' }}
                   itemStyle={{ color: '#c68a35' }}
-                  formatter={(value: number) => [`${value.toLocaleString()} ₫`, 'Doanh thu']}
+                  formatter={(value: number) => [`${value.toLocaleString('vi-VN')} ₫`, 'Doanh thu']}
                 />
                 <Area type="monotone" dataKey="value" stroke="#c68a35" strokeWidth={3} fillOpacity={1} fill="url(#colorValue)" />
               </AreaChart>

@@ -11,12 +11,55 @@ const formatCurrency = (amount: number) => {
   return new Intl.NumberFormat('vi-VN', { style: 'currency', currency: 'VND' }).format(amount);
 };
 
-// Utility for formatting numbers with thousand separators
+// Utility for formatting numbers with thousand separators (dấu chấm)
 const formatNumber = (num: number | string | undefined | null): string => {
   if (num === undefined || num === null) return '0';
   const numValue = typeof num === 'string' ? parseFloat(num) : num;
   if (isNaN(numValue)) return '0';
   return numValue.toLocaleString('vi-VN');
+};
+
+// Utility for formatting price/money with dấu chấm separator
+const formatPrice = (amount: number | string | undefined | null): string => {
+  if (amount === undefined || amount === null) return '0';
+  const numValue = typeof amount === 'string' ? parseFloat(amount) : amount;
+  if (isNaN(numValue)) return '0';
+  return numValue.toLocaleString('vi-VN');
+};
+
+// Utility for formatting date (only date, no time)
+const formatDate = (date: string | Date | undefined | null): string => {
+  if (!date) return '';
+  try {
+    const dateObj = typeof date === 'string' ? new Date(date) : date;
+    if (isNaN(dateObj.getTime())) {
+      // If invalid date, try to parse Vietnamese date format (dd/mm/yyyy)
+      if (typeof date === 'string') {
+        const parts = date.split('/');
+        if (parts.length === 3) {
+          const day = parseInt(parts[0]);
+          const month = parseInt(parts[1]) - 1;
+          const year = parseInt(parts[2]);
+          const parsedDate = new Date(year, month, day);
+          if (!isNaN(parsedDate.getTime())) {
+            return parsedDate.toLocaleDateString('vi-VN', { 
+              day: '2-digit', 
+              month: '2-digit', 
+              year: 'numeric' 
+            });
+          }
+        }
+      }
+      return date.toString(); // Return original if all parsing fails
+    }
+    return dateObj.toLocaleDateString('vi-VN', { 
+      day: '2-digit', 
+      month: '2-digit', 
+      year: 'numeric' 
+    });
+  } catch (error) {
+    return typeof date === 'string' ? date : '';
+  }
 };
 
 // MultiSelect Dropdown Filter
@@ -169,6 +212,9 @@ const ActionMenu: React.FC<{
     </>
   );
 };
+
+// Cache for task assignments - shared across all WorkflowStagesTasksView instances
+const assignmentsCacheRef: { current: Record<string, Record<string, string[]>> } = { current: {} };
 
 // Component to display workflow stages and tasks with assignment
 const WorkflowStagesTasksView: React.FC<{
@@ -538,6 +584,15 @@ const WorkflowStagesTasksView: React.FC<{
 export const Orders: React.FC = () => {
   const { orders, addOrder, updateOrder, deleteOrder, customers, products, members } = useAppStore();
   const [services, setServices] = useState<ServiceCatalogItem[]>([]);
+  
+  // Debug: Log orders để kiểm tra
+  useEffect(() => {
+    console.log('📦 Orders component - orders state:', {
+      ordersCount: orders?.length || 0,
+      orders: orders,
+      ordersIsArray: Array.isArray(orders)
+    });
+  }, [orders]);
   const [workflows, setWorkflows] = useState<WorkflowDefinition[]>([]);
   const workflowsCacheRef = useRef<{ workflows: WorkflowDefinition[]; timestamp: number } | null>(null);
 
@@ -566,20 +621,27 @@ export const Orders: React.FC = () => {
 
   // Filter Logic
   const filteredOrders = useMemo(() => {
-    return orders.filter(order => {
+    if (!orders || !Array.isArray(orders)) {
+      console.warn('⚠️ Orders is not an array:', orders);
+      return [];
+    }
+    
+    const filtered = orders.filter(order => {
+      if (!order || !order.id) return false;
+      
       // Search Text
       if (searchText) {
         const lower = searchText.toLowerCase();
         const customer = customers.find(c => c.id === order.customerId);
-        const match = order.id.toLowerCase().includes(lower) ||
-          order.customerName.toLowerCase().includes(lower) ||
+        const match = (order.id || '').toLowerCase().includes(lower) ||
+          (order.customerName || '').toLowerCase().includes(lower) ||
           (customer?.phone || '').includes(lower);
         if (!match) return false;
       }
 
       // Filter Product
       if (filters.products.length > 0) {
-        const hasProduct = order.items?.some(i => filters.products.includes(i.name));
+        const hasProduct = order.items?.some(i => i && filters.products.includes(i.name));
         if (!hasProduct) return false;
       }
 
@@ -590,6 +652,16 @@ export const Orders: React.FC = () => {
 
       return true;
     });
+    
+    console.log('🔍 Filtered orders:', {
+      totalOrders: orders.length,
+      filteredCount: filtered.length,
+      searchText,
+      filtersProducts: filters.products.length,
+      filtersStatuses: filters.statuses.length
+    });
+    
+    return filtered;
   }, [orders, searchText, filters, customers]);
 
   const updateFilter = (key: keyof typeof filters, val: string[]) => setFilters(prev => ({ ...prev, [key]: val }));
@@ -819,6 +891,12 @@ export const Orders: React.FC = () => {
   const [selectedItemId, setSelectedItemId] = useState('');
   const [customPrice, setCustomPrice] = useState<string>('');
   const [selectedCustomerId, setSelectedCustomerId] = useState('');
+  const [newOrderDiscount, setNewOrderDiscount] = useState<string>('0');
+  const [newOrderAdditionalFees, setNewOrderAdditionalFees] = useState<string>('0');
+  const [selectedItemsForMultiAdd, setSelectedItemsForMultiAdd] = useState<Set<string>>(new Set());
+  const [editingItemIndex, setEditingItemIndex] = useState<number | null>(null);
+  const [editingItemNotes, setEditingItemNotes] = useState<string>('');
+  const [editingItemAssignedMembers, setEditingItemAssignedMembers] = useState<string[]>([]);
 
   // Edit Order Form State
   const [editOrderItems, setEditOrderItems] = useState<ServiceItem[]>([]);
@@ -829,6 +907,12 @@ export const Orders: React.FC = () => {
   const [editDeposit, setEditDeposit] = useState<string>('');
   const [editExpectedDelivery, setEditExpectedDelivery] = useState('');
   const [editNotes, setEditNotes] = useState('');
+  const [editOrderDiscount, setEditOrderDiscount] = useState<string>('0');
+  const [editOrderAdditionalFees, setEditOrderAdditionalFees] = useState<string>('0');
+  const [editSelectedItemsForMultiAdd, setEditSelectedItemsForMultiAdd] = useState<Set<string>>(new Set());
+  const [editingEditItemIndex, setEditingEditItemIndex] = useState<number | null>(null);
+  const [editingEditItemNotes, setEditingEditItemNotes] = useState<string>('');
+  const [editingEditItemAssignedMembers, setEditingEditItemAssignedMembers] = useState<string[]>([]);
 
   const toggleSelectOrder = (id: string, e: React.MouseEvent) => {
     e.stopPropagation();
@@ -954,11 +1038,126 @@ export const Orders: React.FC = () => {
     setNewOrderItems(updated);
   };
 
+  // Handle edit item (notes and assigned members)
+  const handleEditItem = (index: number, isEditMode: boolean = false) => {
+    const items = isEditMode ? editOrderItems : newOrderItems;
+    const item = items[index];
+    if (isEditMode) {
+      setEditingEditItemIndex(index);
+      setEditingEditItemNotes(item.notes || '');
+      setEditingEditItemAssignedMembers(item.assignedMembers || []);
+    } else {
+      setEditingItemIndex(index);
+      setEditingItemNotes(item.notes || '');
+      setEditingItemAssignedMembers(item.assignedMembers || []);
+    }
+  };
+
+  // Handle save item edits
+  const handleSaveItemEdit = (isEditMode: boolean = false) => {
+    if (isEditMode) {
+      if (editingEditItemIndex === null) return;
+      const updated = [...editOrderItems];
+      updated[editingEditItemIndex] = {
+        ...updated[editingEditItemIndex],
+        notes: editingEditItemNotes.trim() || undefined,
+        assignedMembers: editingEditItemAssignedMembers.length > 0 ? editingEditItemAssignedMembers : undefined
+      };
+      setEditOrderItems(updated);
+      setEditingEditItemIndex(null);
+      setEditingEditItemNotes('');
+      setEditingEditItemAssignedMembers([]);
+    } else {
+      if (editingItemIndex === null) return;
+      const updated = [...newOrderItems];
+      updated[editingItemIndex] = {
+        ...updated[editingItemIndex],
+        notes: editingItemNotes.trim() || undefined,
+        assignedMembers: editingItemAssignedMembers.length > 0 ? editingItemAssignedMembers : undefined
+      };
+      setNewOrderItems(updated);
+      setEditingItemIndex(null);
+      setEditingItemNotes('');
+      setEditingItemAssignedMembers([]);
+    }
+  };
+
+  // Handle multi-select add items
+  const handleAddMultipleItems = () => {
+    if (selectedItemsForMultiAdd.size === 0) return;
+
+    const list = selectedItemType === 'SERVICE' ? services : products;
+    const itemsToAdd: ServiceItem[] = [];
+
+    selectedItemsForMultiAdd.forEach(itemId => {
+      const itemData = list.find(i => i.id === itemId);
+      if (!itemData) return;
+
+      let workflowId: string | undefined;
+      let initialStatus = 'In Queue';
+      let initialStageName = 'Chờ Xử Lý';
+
+      if (selectedItemType === 'SERVICE') {
+        const svc = itemData as ServiceCatalogItem;
+        if (svc.workflows && svc.workflows.length > 0) {
+          workflowId = svc.workflows[0].id;
+        } else if (Array.isArray(svc.workflowId) && svc.workflowId.length > 0) {
+          workflowId = svc.workflowId[0];
+        } else if (typeof svc.workflowId === 'string' && svc.workflowId) {
+          workflowId = svc.workflowId;
+        }
+
+        if (workflowId) {
+          const wf = workflows.find(w => w.id === workflowId);
+          if (wf && wf.stages && wf.stages.length > 0) {
+            const sortedStages = [...wf.stages].sort((a, b) => a.order - b.order);
+            initialStatus = sortedStages[0].id;
+            initialStageName = sortedStages[0].name;
+          }
+        }
+      }
+
+      const newItem: ServiceItem = {
+        id: '',
+        name: itemData.name,
+        type: selectedItemType === 'SERVICE' ? ServiceType.REPAIR : ServiceType.PRODUCT,
+        price: itemData.price,
+        status: selectedItemType === 'PRODUCT' ? 'Done' : initialStatus,
+        quantity: 1,
+        beforeImage: itemData.image || '',
+        isProduct: selectedItemType === 'PRODUCT',
+        serviceId: selectedItemType === 'SERVICE' ? itemId : undefined,
+        workflowId: workflowId || undefined,
+        history: [{
+          stageId: selectedItemType === 'PRODUCT' ? 'Done' : initialStatus,
+          stageName: selectedItemType === 'PRODUCT' ? 'Hoàn Thành' : initialStageName,
+          enteredAt: Date.now(),
+          performedBy: 'Hệ thống'
+        }]
+      };
+
+      itemsToAdd.push(newItem);
+    });
+
+    setNewOrderItems([...newOrderItems, ...itemsToAdd]);
+    setSelectedItemsForMultiAdd(new Set());
+  };
+
+  // Helper function to calculate order total
+  const calculateOrderTotal = (items: ServiceItem[], discount: number = 0, additionalFees: number = 0): number => {
+    const subtotal = items.reduce((acc, item) => acc + (item.price * (item.quantity || 1)), 0);
+    const total = subtotal - discount + additionalFees;
+    return Math.max(0, total); // Ensure total is not negative
+  };
+
   const handleCreateOrder = () => {
     if (!selectedCustomerId || newOrderItems.length === 0) return;
 
     const customer = customers.find(c => c.id === selectedCustomerId);
-    const totalAmount = newOrderItems.reduce((acc, item) => acc + item.price, 0);
+    const discount = parseFloat(newOrderDiscount) || 0;
+    const additionalFees = parseFloat(newOrderAdditionalFees) || 0;
+    const subtotal = newOrderItems.reduce((acc, item) => acc + (item.price * (item.quantity || 1)), 0);
+    const totalAmount = calculateOrderTotal(newOrderItems, discount, additionalFees);
 
     // Tự động gán technician cho item đầu tiên (không phải product)
     const firstServiceItem = newOrderItems.find(item => !item.isProduct);
@@ -990,7 +1189,9 @@ export const Orders: React.FC = () => {
       status: OrderStatus.PENDING,
       createdAt: new Date().toLocaleDateString('vi-VN'),
       expectedDelivery: new Date(Date.now() + 7 * 24 * 60 * 60 * 1000).toLocaleDateString('vi-VN'),
-      notes: ''
+      notes: '',
+      discount: discount > 0 ? discount : undefined,
+      additionalFees: additionalFees > 0 ? additionalFees : undefined
     };
 
     addOrder(newOrder);
@@ -998,6 +1199,9 @@ export const Orders: React.FC = () => {
     setIsModalOpen(false);
     setNewOrderItems([]);
     setSelectedCustomerId('');
+    setNewOrderDiscount('0');
+    setNewOrderAdditionalFees('0');
+    setSelectedItemsForMultiAdd(new Set());
   };
 
   const handleEditAddItem = () => {
@@ -1101,17 +1305,15 @@ export const Orders: React.FC = () => {
     if (!editingOrder || !editSelectedCustomerId || editOrderItems.length === 0) return;
 
     const customer = customers.find(c => c.id === editSelectedCustomerId);
-    const totalAmount = editOrderItems.reduce((acc, item) => acc + item.price, 0);
+    const discount = parseFloat(editOrderDiscount) || 0;
+    const additionalFees = parseFloat(editOrderAdditionalFees) || 0;
+    const totalAmount = calculateOrderTotal(editOrderItems, discount, additionalFees);
 
-    // Clean items to remove undefined values and update IDs to format: {orderId}-{serviceId}
+    // Clean items to remove undefined values - PRESERVE original IDs
     const cleanedItems = editOrderItems.map(item => {
-      // Generate ID as {orderId}-{serviceId} if serviceId exists
-      const itemId = item.serviceId
-        ? `${editingOrder.id}-${item.serviceId}`
-        : item.id;
-
+      // Preserve original ID - don't regenerate it
       const cleaned: any = {
-        id: itemId,
+        id: item.id, // Keep original ID to avoid creating duplicates
         name: item.name,
         type: item.type,
         price: item.price,
@@ -1129,6 +1331,10 @@ export const Orders: React.FC = () => {
       if (item.history && item.history.length > 0) cleaned.history = item.history;
       if (item.lastUpdated) cleaned.lastUpdated = item.lastUpdated;
       if (item.technicalLog && item.technicalLog.length > 0) cleaned.technicalLog = item.technicalLog;
+      if (item.notes) cleaned.notes = item.notes;
+      if (item.assignedMembers && item.assignedMembers.length > 0) {
+        cleaned.assignedMembers = item.assignedMembers;
+      }
 
       return cleaned;
     });
@@ -1143,7 +1349,9 @@ export const Orders: React.FC = () => {
       status: editingOrder.status,
       createdAt: editingOrder.createdAt,
       expectedDelivery: editExpectedDelivery,
-      notes: editNotes || ''
+      notes: editNotes || '',
+      discount: discount > 0 ? discount : undefined,
+      additionalFees: additionalFees > 0 ? additionalFees : undefined
     };
 
     try {
@@ -1157,6 +1365,9 @@ export const Orders: React.FC = () => {
       setEditDeposit('');
       setEditExpectedDelivery('');
       setEditNotes('');
+      setEditOrderDiscount('0');
+      setEditOrderAdditionalFees('0');
+      setEditSelectedItemsForMultiAdd(new Set());
     } catch (error: any) {
       console.error('Lỗi khi cập nhật đơn hàng:', error);
       alert('Lỗi khi cập nhật đơn hàng: ' + (error?.message || String(error)));
@@ -1266,12 +1477,27 @@ export const Orders: React.FC = () => {
               </tr>
             </thead>
             <tbody className="divide-y divide-neutral-800">
-              {filteredOrders.length === 0 ? (
-                <tr><td colSpan={8} className="p-12 text-center text-slate-500">Không tìm thấy đơn hàng</td></tr>
+              {!orders || orders.length === 0 ? (
+                <tr><td colSpan={8} className="p-12 text-center text-slate-500">
+                  <div className="flex flex-col items-center gap-2">
+                    <ShoppingBag size={48} className="text-slate-600 opacity-50" />
+                    <p className="text-lg font-semibold text-slate-400">Chưa có đơn hàng nào</p>
+                    <p className="text-sm text-slate-500">Nhấn "Tạo Đơn" để thêm đơn hàng mới</p>
+                  </div>
+                </td></tr>
+              ) : filteredOrders.length === 0 ? (
+                <tr><td colSpan={8} className="p-12 text-center text-slate-500">
+                  <div className="flex flex-col items-center gap-2">
+                    <Search size={48} className="text-slate-600 opacity-50" />
+                    <p className="text-lg font-semibold text-slate-400">Không tìm thấy đơn hàng</p>
+                    <p className="text-sm text-slate-500">Thử thay đổi bộ lọc hoặc từ khóa tìm kiếm</p>
+                    <p className="text-xs text-slate-600 mt-2">Tổng số đơn hàng: {orders.length}</p>
+                  </div>
+                </td></tr>
               ) : filteredOrders.map((order) => {
                 const isSelected = selectedOrderIds.has(order.id);
                 return (
-                  <tr key={order.id} className={`transition-colors cursor-pointer group ${isSelected ? 'bg-gold-900/10' : 'hover:bg-neutral-800/50'}`} onClick={() => setSelectedOrder(order)}>
+                  <tr key={order.id} className={`transition-colors group ${isSelected ? 'bg-gold-900/10' : 'hover:bg-neutral-800/50'}`}>
                     <td className="p-4" onClick={(e) => toggleSelectOrder(order.id, e)}>
                       {isSelected ? <CheckSquare size={18} className="text-gold-500" /> : <Square size={18} className="text-neutral-600" />}
                     </td>
@@ -1300,7 +1526,7 @@ export const Orders: React.FC = () => {
                         )}
                       </div>
                     </td>
-                    <td className="p-4 text-right font-bold text-gold-400">{order.totalAmount.toLocaleString()} ₫</td>
+                    <td className="p-4 text-right font-bold text-gold-400">{formatPrice(order.totalAmount)} ₫</td>
                     <td className="p-4">
                       <span className={`inline-flex items-center px-2 py-0.5 rounded text-[10px] font-bold uppercase border ${order.status === OrderStatus.DONE ? 'bg-green-500/10 text-green-500 border-green-500/20' :
                         order.status === OrderStatus.PENDING ? 'bg-yellow-500/10 text-yellow-500 border-yellow-500/20' :
@@ -1309,18 +1535,51 @@ export const Orders: React.FC = () => {
                         {order.status}
                       </span>
                     </td>
-                    <td className="p-4 text-sm text-slate-400 hidden md:table-cell">{order.expectedDelivery}</td>
+                    <td className="p-4 text-sm text-slate-400 hidden md:table-cell">{formatDate(order.expectedDelivery)}</td>
                     <td className="p-4 sticky right-0 bg-neutral-900/95 backdrop-blur-sm group-hover:bg-neutral-800 transition-colors z-20">
                       <ActionMenu
                         itemName={order.id}
-                        onView={() => setSelectedOrder(order)}
+                        onView={() => {
+                          setSelectedOrder(order);
+                          setEditingOrder(null);
+                          setIsEditModalOpen(false);
+                        }}
                         onEdit={() => {
+                          if (!order) return;
+                          
                           setEditingOrder(order);
-                          setEditOrderItems([...order.items]);
-                          setEditSelectedCustomerId(order.customerId);
-                          setEditDeposit(order.deposit?.toString() || '0');
-                          setEditExpectedDelivery(order.expectedDelivery || '');
+                          setEditOrderItems([...order.items] || []);
+                          
+                          // Find matching customer ID - try multiple ways
+                          let customerIdToUse = order.customerId || '';
+                          
+                          // If customerId doesn't match any customer, try to find by name
+                          if (customerIdToUse && !customers.find(c => c.id === customerIdToUse)) {
+                            const customerByName = customers.find(c => 
+                              c.name === order.customerName || 
+                              c.name.toLowerCase() === order.customerName?.toLowerCase()
+                            );
+                            if (customerByName) {
+                              customerIdToUse = customerByName.id;
+                            }
+                          }
+                          
+                          // If still no match, try first customer as fallback
+                          if (!customerIdToUse && customers.length > 0) {
+                            customerIdToUse = customers[0].id;
+                          }
+                          
+                          setEditSelectedCustomerId(customerIdToUse);
+                          setEditDeposit((order.deposit || 0).toString());
+                          setEditExpectedDelivery(order.expectedDelivery || formatDate(order.expectedDelivery) || '');
                           setEditNotes(order.notes || '');
+                          setEditOrderDiscount((order.discount || 0).toString());
+                          setEditOrderAdditionalFees((order.additionalFees || 0).toString());
+                          setEditSelectedItemsForMultiAdd(new Set());
+                          setEditSelectedItemType('SERVICE');
+                          setEditSelectedItemId('');
+                          setEditCustomPrice('');
+                          setSelectedOrder(null);
                           setIsEditModalOpen(true);
                         }}
                         onDelete={() => deleteOrder(order.id)}
@@ -1335,7 +1594,7 @@ export const Orders: React.FC = () => {
       </div>
 
       {/* Detail Modal */}
-      {selectedOrder && (
+      {selectedOrder && !isEditModalOpen && (
         <div className="fixed inset-0 bg-black/80 backdrop-blur-sm z-50 flex items-center justify-center p-4">
           <div className="bg-neutral-900 rounded-xl w-full max-w-4xl max-h-[90vh] overflow-y-auto shadow-2xl border border-neutral-800 animate-in zoom-in-95 duration-200">
             <div className="p-6 border-b border-neutral-800 flex justify-between items-center sticky top-0 bg-neutral-900 z-10">
@@ -1411,7 +1670,7 @@ export const Orders: React.FC = () => {
                             )}
                           </div>
                           <div className="text-right">
-                            <div className="font-medium text-slate-300">{item.price.toLocaleString()} ₫</div>
+                            <div className="font-medium text-slate-300">{formatPrice(item.price)} ₫</div>
                           </div>
                         </div>
                       );
@@ -1448,20 +1707,34 @@ export const Orders: React.FC = () => {
                   <h3 className="text-sm font-semibold uppercase tracking-wider text-slate-500 mb-4">Thanh Toán</h3>
                   <div className="space-y-2 text-sm">
                     <div className="flex justify-between">
-                      <span className="text-slate-500">Tạm tính</span>
-                      <span className="text-slate-300">{selectedOrder.totalAmount.toLocaleString()} ₫</span>
+                      <span className="text-slate-500">Tạm tính ({selectedOrder.items?.length || 0} mục)</span>
+                      <span className="text-slate-300">
+                        {formatPrice((selectedOrder.items || []).reduce((acc, i) => acc + (i.price * (i.quantity || 1)), 0))} ₫
+                      </span>
                     </div>
+                    {(selectedOrder.discount || 0) > 0 && (
+                      <div className="flex justify-between text-emerald-400">
+                        <span>Khấu trừ</span>
+                        <span>-{formatPrice(selectedOrder.discount || 0)} ₫</span>
+                      </div>
+                    )}
+                    {(selectedOrder.additionalFees || 0) > 0 && (
+                      <div className="flex justify-between text-blue-400">
+                        <span>Phụ phí phát sinh</span>
+                        <span>+{formatPrice(selectedOrder.additionalFees || 0)} ₫</span>
+                      </div>
+                    )}
                     <div className="flex justify-between font-bold text-slate-200 pt-2 border-t border-neutral-700">
-                      <span>Tổng cộng</span>
-                      <span>{selectedOrder.totalAmount.toLocaleString()} ₫</span>
+                      <span>Tổng hóa đơn</span>
+                      <span>{formatPrice(selectedOrder.totalAmount)} ₫</span>
                     </div>
                     <div className="flex justify-between text-gold-500">
                       <span>Đã cọc</span>
-                      <span>-{selectedOrder.deposit.toLocaleString()} ₫</span>
+                      <span>-{formatPrice(selectedOrder.deposit || 0)} ₫</span>
                     </div>
-                    <div className="flex justify-between font-bold text-red-500 pt-2">
+                    <div className="flex justify-between font-bold text-red-500 pt-2 border-t border-neutral-700">
                       <span>Còn lại</span>
-                      <span>{(selectedOrder.totalAmount - selectedOrder.deposit).toLocaleString()} ₫</span>
+                      <span>{formatPrice(selectedOrder.totalAmount - (selectedOrder.deposit || 0))} ₫</span>
                     </div>
                   </div>
                 </div>
@@ -1519,8 +1792,8 @@ export const Orders: React.FC = () => {
                         <div className="text-2xl font-black text-black mb-1">{order.id}</div>
                         <div className="font-bold text-lg mb-2">{order.customerName}</div>
                         <div className="text-sm text-slate-600 space-y-1">
-                          <p>Ngày nhận: {order.createdAt}</p>
-                          <p>Hẹn trả: {order.expectedDelivery}</p>
+                          <p>Ngày nhận: {formatDate(order.createdAt)}</p>
+                          <p>Hẹn trả: {formatDate(order.expectedDelivery)}</p>
                           <p className="font-semibold text-black">{order.items.length} Sản phẩm</p>
                         </div>
                       </div>
@@ -1575,6 +1848,9 @@ export const Orders: React.FC = () => {
               <div>
                 <div className="flex items-center justify-between mb-2">
                   <h3 className="font-bold text-slate-200">Sản Phẩm & Dịch Vụ</h3>
+                  <span className="text-xs text-slate-500">
+                    {newOrderItems.length} mục đã chọn
+                  </span>
                 </div>
 
                 {/* Add Item Form */}
@@ -1585,7 +1861,12 @@ export const Orders: React.FC = () => {
                         type="radio"
                         name="type"
                         checked={selectedItemType === 'SERVICE'}
-                        onChange={() => { setSelectedItemType('SERVICE'); setSelectedItemId(''); setCustomPrice(''); }}
+                        onChange={() => { 
+                          setSelectedItemType('SERVICE'); 
+                          setSelectedItemId(''); 
+                          setCustomPrice(''); 
+                          setSelectedItemsForMultiAdd(new Set());
+                        }}
                         className="text-gold-500 focus:ring-gold-500 bg-neutral-900 border-neutral-700"
                       />
                       <span className="text-sm font-medium text-slate-300">Dịch Vụ (Spa/Sửa chữa)</span>
@@ -1595,16 +1876,81 @@ export const Orders: React.FC = () => {
                         type="radio"
                         name="type"
                         checked={selectedItemType === 'PRODUCT'}
-                        onChange={() => { setSelectedItemType('PRODUCT'); setSelectedItemId(''); setCustomPrice(''); }}
+                        onChange={() => { 
+                          setSelectedItemType('PRODUCT'); 
+                          setSelectedItemId(''); 
+                          setCustomPrice(''); 
+                          setSelectedItemsForMultiAdd(new Set());
+                        }}
                         className="text-gold-500 focus:ring-gold-500 bg-neutral-900 border-neutral-700"
                       />
                       <span className="text-sm font-medium text-slate-300">Sản Phẩm Bán Lẻ</span>
                     </label>
                   </div>
 
+                  {/* Multi-select mode */}
+                  <div className="mb-3 pb-3 border-b border-gold-900/20">
+                    <label className="flex items-center gap-2 cursor-pointer text-sm">
+                      <input
+                        type="checkbox"
+                        checked={selectedItemsForMultiAdd.size > 0}
+                        onChange={(e) => {
+                          if (!e.target.checked) {
+                            setSelectedItemsForMultiAdd(new Set());
+                          }
+                        }}
+                        className="rounded border-neutral-600 bg-neutral-900 text-gold-500 focus:ring-gold-500"
+                      />
+                      <span className="text-slate-300">Chế độ chọn nhiều ({selectedItemsForMultiAdd.size} đã chọn)</span>
+                    </label>
+                  </div>
+
+                  {/* Multi-select list with checkboxes */}
+                  <div className="max-h-48 overflow-y-auto mb-3 space-y-2 border border-neutral-700 rounded-lg p-3 bg-neutral-900/50">
+                    <div className="flex items-center gap-2 pb-2 border-b border-neutral-700">
+                      <input
+                        type="checkbox"
+                        checked={selectedItemsForMultiAdd.size > 0 && selectedItemsForMultiAdd.size === (selectedItemType === 'SERVICE' ? services : products).length}
+                        onChange={(e) => {
+                          const list = selectedItemType === 'SERVICE' ? services : products;
+                          if (e.target.checked) {
+                            setSelectedItemsForMultiAdd(new Set(list.map(i => i.id)));
+                          } else {
+                            setSelectedItemsForMultiAdd(new Set());
+                          }
+                        }}
+                        className="rounded border-neutral-600 bg-neutral-800 text-gold-500 focus:ring-gold-500"
+                      />
+                      <span className="text-xs font-semibold text-slate-400 uppercase">Chọn tất cả</span>
+                    </div>
+                    {(selectedItemType === 'SERVICE' ? services : products).map(item => (
+                      <label key={item.id} className="flex items-center gap-2 p-2 hover:bg-neutral-800 rounded cursor-pointer">
+                        <input
+                          type="checkbox"
+                          checked={selectedItemsForMultiAdd.has(item.id)}
+                          onChange={(e) => {
+                            const newSet = new Set(selectedItemsForMultiAdd);
+                            if (e.target.checked) {
+                              newSet.add(item.id);
+                            } else {
+                              newSet.delete(item.id);
+                            }
+                            setSelectedItemsForMultiAdd(newSet);
+                          }}
+                          className="rounded border-neutral-600 bg-neutral-800 text-gold-500 focus:ring-gold-500"
+                        />
+                        <span className="text-sm text-slate-300 flex-1">{item.name}</span>
+                        <span className="text-xs text-slate-500">
+                          {formatPrice(item.price || 0)} ₫
+                        </span>
+                      </label>
+                    ))}
+                  </div>
+
+                  {/* Single select mode (fallback) */}
                   <div className="flex gap-3 items-end">
                     <div className="flex-1">
-                      <label className="block text-xs font-semibold text-slate-500 mb-1 uppercase">Chọn {selectedItemType === 'SERVICE' ? 'Dịch Vụ' : 'Sản Phẩm'}</label>
+                      <label className="block text-xs font-semibold text-slate-500 mb-1 uppercase">Hoặc chọn từng mục</label>
                       <select
                         className="w-full p-2 border border-neutral-700 rounded-lg text-sm bg-neutral-900 text-slate-200 focus:border-gold-500 outline-none"
                         value={selectedItemId}
@@ -1618,12 +1964,12 @@ export const Orders: React.FC = () => {
                           }
                         }}
                       >
-                        <option value="">-- Chọn --</option>
+                        <option value="">-- Chọn từng mục --</option>
                         {selectedItemType === 'SERVICE' ? (
                           services.length > 0 ? (
                             services.map(s => (
                               <option key={s.id} value={s.id}>
-                                {s.name} (Giá gốc: {(s.price || 0).toLocaleString()} ₫)
+                                {s.name} (Giá gốc: {formatPrice(s.price || 0)} ₫)
                               </option>
                             ))
                           ) : (
@@ -1644,34 +1990,85 @@ export const Orders: React.FC = () => {
                         placeholder="0"
                       />
                     </div>
-                    <button
-                      onClick={handleAddItem}
-                      disabled={!selectedItemId}
-                      className="px-4 py-2 bg-slate-100 text-black rounded-lg text-sm font-medium hover:bg-white disabled:bg-neutral-800 disabled:text-slate-600 transition-colors"
-                    >
-                      Thêm
-                    </button>
+                    <div className="flex flex-col gap-2">
+                      <button
+                        onClick={handleAddMultipleItems}
+                        disabled={selectedItemsForMultiAdd.size === 0}
+                        className="px-4 py-2 bg-gold-600 text-black rounded-lg text-sm font-medium hover:bg-gold-700 disabled:bg-neutral-800 disabled:text-slate-600 transition-colors"
+                        title={`Thêm ${selectedItemsForMultiAdd.size} mục đã chọn`}
+                      >
+                        Thêm ({selectedItemsForMultiAdd.size})
+                      </button>
+                      <button
+                        onClick={handleAddItem}
+                        disabled={!selectedItemId}
+                        className="px-4 py-2 bg-slate-100 text-black rounded-lg text-sm font-medium hover:bg-white disabled:bg-neutral-800 disabled:text-slate-600 transition-colors"
+                      >
+                        Thêm 1
+                      </button>
+                    </div>
                   </div>
                 </div>
 
                 {/* Items List */}
                 <div className="space-y-2">
                   {newOrderItems.map((item, idx) => (
-                    <div key={idx} className="flex justify-between items-center p-3 bg-neutral-800/50 rounded-lg border border-neutral-700 text-sm">
-                      <div className="flex items-center gap-3">
-                        <div className="w-8 h-8 rounded bg-neutral-700 flex items-center justify-center text-slate-400">
-                          {idx + 1}
+                    <div key={idx} className="p-3 bg-neutral-800/50 rounded-lg border border-neutral-700 text-sm">
+                      <div className="flex justify-between items-start">
+                        <div className="flex items-start gap-3 flex-1">
+                          <div className="w-8 h-8 rounded bg-neutral-700 flex items-center justify-center text-slate-400 flex-shrink-0">
+                            {idx + 1}
+                          </div>
+                          <div className="flex-1 min-w-0">
+                            <div className="font-medium text-slate-200">{item.name}</div>
+                            <div className="text-xs text-slate-500">{item.type}</div>
+                            
+                            {/* Display notes if exists */}
+                            {item.notes && (
+                              <div className="mt-2 text-xs text-slate-400 bg-neutral-900/50 px-2 py-1 rounded border border-neutral-700">
+                                <span className="font-semibold text-slate-500">Ghi chú:</span> {item.notes}
+                              </div>
+                            )}
+                            
+                            {/* Display assigned members if exists */}
+                            {item.assignedMembers && item.assignedMembers.length > 0 && (
+                              <div className="mt-2 flex flex-wrap gap-1.5">
+                                {item.assignedMembers.map(memberId => {
+                                  const member = members.find(m => m.id === memberId);
+                                  if (!member) return null;
+                                  return (
+                                    <div
+                                      key={memberId}
+                                      className="flex items-center gap-1.5 px-2 py-1 bg-blue-900/20 rounded border border-blue-800/40 text-xs"
+                                    >
+                                      {member.avatar ? (
+                                        <img src={member.avatar} alt="" className="w-4 h-4 rounded-full" />
+                                      ) : (
+                                        <div className="w-4 h-4 rounded-full bg-blue-600 flex items-center justify-center text-[8px] font-bold text-white">
+                                          {member.name.charAt(0).toUpperCase()}
+                                        </div>
+                                      )}
+                                      <span className="text-blue-300 font-medium">{member.name}</span>
+                                    </div>
+                                  );
+                                })}
+                              </div>
+                            )}
+                          </div>
                         </div>
-                        <div>
-                          <div className="font-medium text-slate-200">{item.name}</div>
-                          <div className="text-xs text-slate-500">{item.type}</div>
+                        <div className="flex items-center gap-2 flex-shrink-0">
+                          <span className="font-medium text-slate-300">{formatPrice(item.price)} ₫</span>
+                          <button 
+                            onClick={() => handleEditItem(idx, false)} 
+                            className="p-1.5 hover:bg-gold-900/20 hover:text-gold-400 text-slate-500 rounded transition-colors"
+                            title="Thêm ghi chú và nhân sự"
+                          >
+                            <Plus size={16} />
+                          </button>
+                          <button onClick={() => handleRemoveItem(idx)} className="p-1 hover:text-red-500 text-slate-500">
+                            <Trash2 size={16} />
+                          </button>
                         </div>
-                      </div>
-                      <div className="flex items-center gap-4">
-                        <span className="font-medium text-slate-300">{item.price.toLocaleString()} ₫</span>
-                        <button onClick={() => handleRemoveItem(idx)} className="p-1 hover:text-red-500 text-slate-500">
-                          <Trash2 size={16} />
-                        </button>
                       </div>
                     </div>
                   ))}
@@ -1682,12 +2079,64 @@ export const Orders: React.FC = () => {
                   )}
                 </div>
 
-                <div className="mt-4 pt-4 border-t border-neutral-800 flex justify-end">
-                  <div className="text-right">
-                    <p className="text-slate-500 text-sm mb-1">Tổng cộng dự kiến</p>
-                    <p className="text-2xl font-bold text-gold-500">
-                      {newOrderItems.reduce((acc, i) => acc + i.price, 0).toLocaleString()} ₫
-                    </p>
+                {/* Discount and Additional Fees */}
+                <div className="mt-4 pt-4 border-t border-neutral-800 space-y-4">
+                  <div className="grid grid-cols-2 gap-4">
+                    <div>
+                      <label className="block text-sm font-bold text-slate-300 mb-2">
+                        Khấu trừ (Giảm giá) <span className="text-slate-500 text-xs">VNĐ</span>
+                      </label>
+                      <input
+                        type="number"
+                        value={newOrderDiscount}
+                        onChange={(e) => setNewOrderDiscount(e.target.value)}
+                        className="w-full p-2.5 bg-neutral-800 border border-neutral-700 rounded-lg text-slate-200 focus:ring-1 focus:ring-gold-500 outline-none"
+                        placeholder="0"
+                        min="0"
+                      />
+                    </div>
+                    <div>
+                      <label className="block text-sm font-bold text-slate-300 mb-2">
+                        Phụ phí phát sinh <span className="text-slate-500 text-xs">VNĐ</span>
+                      </label>
+                      <input
+                        type="number"
+                        value={newOrderAdditionalFees}
+                        onChange={(e) => setNewOrderAdditionalFees(e.target.value)}
+                        className="w-full p-2.5 bg-neutral-800 border border-neutral-700 rounded-lg text-slate-200 focus:ring-1 focus:ring-gold-500 outline-none"
+                        placeholder="0"
+                        min="0"
+                      />
+                    </div>
+                  </div>
+
+                  {/* Invoice Summary */}
+                  <div className="bg-neutral-800/50 p-4 rounded-lg border border-neutral-700">
+                    <h4 className="text-sm font-semibold text-slate-300 mb-3">Tổng Hóa Đơn</h4>
+                    <div className="space-y-2 text-sm">
+                      <div className="flex justify-between text-slate-400">
+                        <span>Tạm tính ({newOrderItems.length} mục):</span>
+                        <span>{formatPrice(newOrderItems.reduce((acc, i) => acc + (i.price * (i.quantity || 1)), 0))} ₫</span>
+                      </div>
+                      {parseFloat(newOrderDiscount) > 0 && (
+                        <div className="flex justify-between text-emerald-400">
+                          <span>Khấu trừ:</span>
+                          <span>-{formatPrice(parseFloat(newOrderDiscount) || 0)} ₫</span>
+                        </div>
+                      )}
+                      {parseFloat(newOrderAdditionalFees) > 0 && (
+                        <div className="flex justify-between text-blue-400">
+                          <span>Phụ phí phát sinh:</span>
+                          <span>+{formatPrice(parseFloat(newOrderAdditionalFees) || 0)} ₫</span>
+                        </div>
+                      )}
+                      <div className="pt-2 border-t border-neutral-700 flex justify-between font-bold text-lg">
+                        <span className="text-slate-200">Tổng cộng:</span>
+                        <span className="text-gold-500">
+                          {formatPrice(calculateOrderTotal(newOrderItems, parseFloat(newOrderDiscount) || 0, parseFloat(newOrderAdditionalFees) || 0))} ₫
+                        </span>
+                      </div>
+                    </div>
                   </div>
                 </div>
               </div>
@@ -1713,13 +2162,13 @@ export const Orders: React.FC = () => {
       )}
 
       {/* Edit Order Modal */}
-      {isEditModalOpen && (
-        <div className="fixed inset-0 bg-black/80 backdrop-blur-sm z-50 flex items-center justify-center p-4">
+      {isEditModalOpen && editingOrder && (
+        <div className="fixed inset-0 bg-black/80 backdrop-blur-sm z-[60] flex items-center justify-center p-4">
           {/* Re-implementing Edit Modal Content similar to above but with Edit state */}
           <div className="bg-neutral-900 rounded-xl w-full max-w-4xl max-h-[90vh] flex flex-col shadow-2xl border border-neutral-800 animate-in zoom-in-95 duration-200">
             <div className="p-6 border-b border-neutral-800">
               <h2 className="text-xl font-serif font-bold text-slate-100">Chỉnh Sửa Đơn Hàng</h2>
-              <p className="text-slate-500 text-sm">Cập nhật thông tin đơn hàng #{editingOrder?.id}</p>
+              <p className="text-slate-500 text-sm">Cập nhật thông tin đơn hàng #{editingOrder.id}</p>
             </div>
 
             <div className="flex-1 overflow-y-auto p-6 space-y-6">
@@ -1784,7 +2233,7 @@ export const Orders: React.FC = () => {
                       >
                         <option value="">-- Chọn --</option>
                         {editSelectedItemType === 'SERVICE'
-                          ? services.map(s => <option key={s.id} value={s.id}>{s.name} (Giá gốc: {(s.price || 0).toLocaleString()})</option>)
+                          ? services.map(s => <option key={s.id} value={s.id}>{s.name} (Giá gốc: {formatPrice(s.price || 0)})</option>)
                           : products.map(p => <option key={p.id} value={p.id}>{p.name} (Tồn: {formatNumber(p.stock)})</option>)
                         }
                       </select>
@@ -1817,18 +2266,57 @@ export const Orders: React.FC = () => {
 
                     return (
                       <div key={idx} className="p-3 bg-neutral-800/50 rounded-lg border border-neutral-700 text-sm">
-                        <div className="flex justify-between items-center">
-                          <div className="flex items-center gap-3">
-                            <div className="w-8 h-8 rounded bg-neutral-700 flex items-center justify-center text-slate-400">
+                        <div className="flex justify-between items-start">
+                          <div className="flex items-start gap-3 flex-1">
+                            <div className="w-8 h-8 rounded bg-neutral-700 flex items-center justify-center text-slate-400 flex-shrink-0">
                               {idx + 1}
                             </div>
-                            <div>
+                            <div className="flex-1 min-w-0">
                               <div className="font-medium text-slate-200">{item.name}</div>
                               <div className="text-xs text-slate-500">{item.type}</div>
+                              
+                              {/* Display notes if exists */}
+                              {item.notes && (
+                                <div className="mt-2 text-xs text-slate-400 bg-neutral-900/50 px-2 py-1 rounded border border-neutral-700">
+                                  <span className="font-semibold text-slate-500">Ghi chú:</span> {item.notes}
+                                </div>
+                              )}
+                              
+                              {/* Display assigned members if exists */}
+                              {item.assignedMembers && item.assignedMembers.length > 0 && (
+                                <div className="mt-2 flex flex-wrap gap-1.5">
+                                  {item.assignedMembers.map(memberId => {
+                                    const member = members.find(m => m.id === memberId);
+                                    if (!member) return null;
+                                    return (
+                                      <div
+                                        key={memberId}
+                                        className="flex items-center gap-1.5 px-2 py-1 bg-blue-900/20 rounded border border-blue-800/40 text-xs"
+                                      >
+                                        {member.avatar ? (
+                                          <img src={member.avatar} alt="" className="w-4 h-4 rounded-full" />
+                                        ) : (
+                                          <div className="w-4 h-4 rounded-full bg-blue-600 flex items-center justify-center text-[8px] font-bold text-white">
+                                            {member.name.charAt(0).toUpperCase()}
+                                          </div>
+                                        )}
+                                        <span className="text-blue-300 font-medium">{member.name}</span>
+                                      </div>
+                                    );
+                                  })}
+                                </div>
+                              )}
                             </div>
                           </div>
-                          <div className="flex items-center gap-4">
-                            <span className="font-medium text-slate-300">{item.price.toLocaleString()} ₫</span>
+                          <div className="flex items-center gap-2 flex-shrink-0">
+                            <span className="font-medium text-slate-300">{formatPrice(item.price)} ₫</span>
+                            <button 
+                              onClick={() => handleEditItem(idx, true)} 
+                              className="p-1.5 hover:bg-gold-900/20 hover:text-gold-400 text-slate-500 rounded transition-colors"
+                              title="Thêm ghi chú và nhân sự"
+                            >
+                              <Plus size={16} />
+                            </button>
                             <button onClick={() => handleEditRemoveItem(idx)} className="p-1 hover:text-red-500 text-slate-500">
                               <Trash2 size={16} />
                             </button>
@@ -1895,26 +2383,87 @@ export const Orders: React.FC = () => {
               </div>
 
               {/* Extra Info */}
-              <div className="grid grid-cols-2 gap-4">
-                <div>
-                  <label className="block text-sm font-bold text-slate-300 mb-2">Tiền Cọc</label>
-                  <input
-                    type="number"
-                    value={editDeposit}
-                    onChange={(e) => setEditDeposit(e.target.value)}
-                    className="w-full p-2.5 bg-neutral-800 border border-neutral-700 rounded-lg text-slate-200 focus:ring-1 focus:ring-gold-500 outline-none"
-                    placeholder="0"
-                  />
+              <div className="space-y-4">
+                <div className="grid grid-cols-2 gap-4">
+                  <div>
+                    <label className="block text-sm font-bold text-slate-300 mb-2">Tiền Cọc</label>
+                    <input
+                      type="number"
+                      value={editDeposit}
+                      onChange={(e) => setEditDeposit(e.target.value)}
+                      className="w-full p-2.5 bg-neutral-800 border border-neutral-700 rounded-lg text-slate-200 focus:ring-1 focus:ring-gold-500 outline-none"
+                      placeholder="0"
+                    />
+                  </div>
+                  <div>
+                    <label className="block text-sm font-bold text-slate-300 mb-2">Ngày Trả Dự Kiến</label>
+                    <input
+                      type="text"
+                      value={editExpectedDelivery}
+                      onChange={(e) => setEditExpectedDelivery(e.target.value)}
+                      className="w-full p-2.5 bg-neutral-800 border border-neutral-700 rounded-lg text-slate-200 focus:ring-1 focus:ring-gold-500 outline-none"
+                      placeholder="dd/mm/yyyy"
+                    />
+                  </div>
                 </div>
-                <div>
-                  <label className="block text-sm font-bold text-slate-300 mb-2">Ngày Trả Dự Kiến</label>
-                  <input
-                    type="text"
-                    value={editExpectedDelivery}
-                    onChange={(e) => setEditExpectedDelivery(e.target.value)}
-                    className="w-full p-2.5 bg-neutral-800 border border-neutral-700 rounded-lg text-slate-200 focus:ring-1 focus:ring-gold-500 outline-none"
-                    placeholder="dd/mm/yyyy"
-                  />
+
+                {/* Discount and Additional Fees for Edit */}
+                <div className="grid grid-cols-2 gap-4">
+                  <div>
+                    <label className="block text-sm font-bold text-slate-300 mb-2">
+                      Khấu trừ (Giảm giá) <span className="text-slate-500 text-xs">VNĐ</span>
+                    </label>
+                    <input
+                      type="number"
+                      value={editOrderDiscount}
+                      onChange={(e) => setEditOrderDiscount(e.target.value)}
+                      className="w-full p-2.5 bg-neutral-800 border border-neutral-700 rounded-lg text-slate-200 focus:ring-1 focus:ring-gold-500 outline-none"
+                      placeholder="0"
+                      min="0"
+                    />
+                  </div>
+                  <div>
+                    <label className="block text-sm font-bold text-slate-300 mb-2">
+                      Phụ phí phát sinh <span className="text-slate-500 text-xs">VNĐ</span>
+                    </label>
+                    <input
+                      type="number"
+                      value={editOrderAdditionalFees}
+                      onChange={(e) => setEditOrderAdditionalFees(e.target.value)}
+                      className="w-full p-2.5 bg-neutral-800 border border-neutral-700 rounded-lg text-slate-200 focus:ring-1 focus:ring-gold-500 outline-none"
+                      placeholder="0"
+                      min="0"
+                    />
+                  </div>
+                </div>
+
+                {/* Invoice Summary for Edit */}
+                <div className="bg-neutral-800/50 p-4 rounded-lg border border-neutral-700">
+                  <h4 className="text-sm font-semibold text-slate-300 mb-3">Tổng Hóa Đơn</h4>
+                  <div className="space-y-2 text-sm">
+                    <div className="flex justify-between text-slate-400">
+                      <span>Tạm tính ({editOrderItems.length} mục):</span>
+                      <span>{formatPrice(editOrderItems.reduce((acc, i) => acc + (i.price * (i.quantity || 1)), 0))} ₫</span>
+                    </div>
+                    {parseFloat(editOrderDiscount) > 0 && (
+                      <div className="flex justify-between text-emerald-400">
+                        <span>Khấu trừ:</span>
+                        <span>-{formatPrice(parseFloat(editOrderDiscount) || 0)} ₫</span>
+                      </div>
+                    )}
+                    {parseFloat(editOrderAdditionalFees) > 0 && (
+                      <div className="flex justify-between text-blue-400">
+                        <span>Phụ phí phát sinh:</span>
+                        <span>+{formatPrice(parseFloat(editOrderAdditionalFees) || 0)} ₫</span>
+                      </div>
+                    )}
+                    <div className="pt-2 border-t border-neutral-700 flex justify-between font-bold text-lg">
+                      <span className="text-slate-200">Tổng cộng:</span>
+                      <span className="text-gold-500">
+                        {formatPrice(calculateOrderTotal(editOrderItems, parseFloat(editOrderDiscount) || 0, parseFloat(editOrderAdditionalFees) || 0))} ₫
+                      </span>
+                    </div>
+                  </div>
                 </div>
               </div>
 
@@ -1941,6 +2490,127 @@ export const Orders: React.FC = () => {
                 className="px-6 py-2.5 bg-gold-600 hover:bg-gold-700 text-black font-medium rounded-lg shadow-lg shadow-gold-900/20 transition-all font-bold"
               >
                 Cập Nhật Đơn Hàng
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
+
+      {/* Edit Item Modal (for notes and assigned members) */}
+      {(editingItemIndex !== null || editingEditItemIndex !== null) && (
+        <div className="fixed inset-0 bg-black/80 backdrop-blur-sm z-50 flex items-center justify-center p-4">
+          <div className="bg-neutral-900 rounded-xl w-full max-w-md shadow-2xl border border-neutral-800 animate-in zoom-in-95 duration-200">
+            <div className="p-6 border-b border-neutral-800">
+              <h2 className="text-xl font-serif font-bold text-slate-100">Thêm Ghi Chú & Nhân Sự</h2>
+              <p className="text-slate-500 text-sm mt-1">
+                {editingItemIndex !== null 
+                  ? newOrderItems[editingItemIndex]?.name 
+                  : editOrderItems[editingEditItemIndex!]?.name}
+              </p>
+            </div>
+
+            <div className="p-6 space-y-6">
+              {/* Notes */}
+              <div>
+                <label className="block text-sm font-bold text-slate-300 mb-2">
+                  Ghi chú
+                </label>
+                <textarea
+                  value={editingItemIndex !== null ? editingItemNotes : editingEditItemNotes}
+                  onChange={(e) => {
+                    if (editingItemIndex !== null) {
+                      setEditingItemNotes(e.target.value);
+                    } else {
+                      setEditingEditItemNotes(e.target.value);
+                    }
+                  }}
+                  className="w-full p-3 bg-neutral-800 border border-neutral-700 rounded-lg text-slate-200 focus:ring-1 focus:ring-gold-500 outline-none h-24 resize-none"
+                  placeholder="Nhập ghi chú cho item này..."
+                />
+              </div>
+
+              {/* Assigned Members */}
+              <div>
+                <label className="block text-sm font-bold text-slate-300 mb-2">
+                  Nhân sự phụ trách
+                </label>
+                <div className="max-h-48 overflow-y-auto border border-neutral-700 rounded-lg p-2 bg-neutral-800/50 space-y-2">
+                  {members.length === 0 ? (
+                    <div className="text-center py-4 text-slate-500 text-sm">Chưa có nhân sự nào</div>
+                  ) : (
+                    members.map(member => {
+                      const isSelected = (editingItemIndex !== null 
+                        ? editingItemAssignedMembers 
+                        : editingEditItemAssignedMembers).includes(member.id);
+                      
+                      return (
+                        <label
+                          key={member.id}
+                          className="flex items-center gap-3 p-2 hover:bg-neutral-700 rounded cursor-pointer transition-colors"
+                        >
+                          <input
+                            type="checkbox"
+                            checked={isSelected}
+                            onChange={(e) => {
+                              const currentMembers = editingItemIndex !== null 
+                                ? editingItemAssignedMembers 
+                                : editingEditItemAssignedMembers;
+                              
+                              let newMembers: string[];
+                              if (e.target.checked) {
+                                newMembers = [...currentMembers, member.id];
+                              } else {
+                                newMembers = currentMembers.filter(id => id !== member.id);
+                              }
+                              
+                              if (editingItemIndex !== null) {
+                                setEditingItemAssignedMembers(newMembers);
+                              } else {
+                                setEditingEditItemAssignedMembers(newMembers);
+                              }
+                            }}
+                            className="rounded border-neutral-600 bg-neutral-900 text-gold-500 focus:ring-gold-500"
+                          />
+                          <div className="flex items-center gap-2 flex-1">
+                            {member.avatar ? (
+                              <img src={member.avatar} alt="" className="w-8 h-8 rounded-full" />
+                            ) : (
+                              <div className="w-8 h-8 rounded-full bg-blue-600 flex items-center justify-center text-xs font-bold text-white">
+                                {member.name.charAt(0).toUpperCase()}
+                              </div>
+                            )}
+                            <div>
+                              <div className="text-sm font-medium text-slate-200">{member.name}</div>
+                              <div className="text-xs text-slate-500">{member.role} • {member.department || 'N/A'}</div>
+                            </div>
+                          </div>
+                        </label>
+                      );
+                    })
+                  )}
+                </div>
+              </div>
+            </div>
+
+            <div className="p-6 border-t border-neutral-800 flex justify-end gap-3">
+              <button
+                onClick={() => {
+                  setEditingItemIndex(null);
+                  setEditingEditItemIndex(null);
+                  setEditingItemNotes('');
+                  setEditingEditItemNotes('');
+                  setEditingItemAssignedMembers([]);
+                  setEditingEditItemAssignedMembers([]);
+                }}
+                className="px-6 py-2.5 border border-neutral-700 bg-neutral-800 text-slate-300 rounded-lg hover:bg-neutral-700 transition-colors"
+              >
+                Hủy
+              </button>
+              <button
+                onClick={() => handleSaveItemEdit(editingEditItemIndex !== null)}
+                className="px-6 py-2.5 bg-gold-600 hover:bg-gold-700 text-black font-medium rounded-lg shadow-lg shadow-gold-900/20 transition-all"
+              >
+                Lưu
               </button>
             </div>
           </div>

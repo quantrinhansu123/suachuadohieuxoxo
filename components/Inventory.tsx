@@ -635,7 +635,7 @@ export const Inventory: React.FC = () => {
               <div>
                 <p className="text-sm text-slate-500 font-medium group-hover:text-gold-500 transition-colors">Giá trị tồn kho</p>
                 <h3 className="text-2xl font-bold text-slate-100">
-                  {(inventory.reduce((acc, i) => acc + (i.quantity * i.importPrice), 0)).toLocaleString()} ₫
+                  {(inventory.reduce((acc, i) => acc + (i.quantity * i.importPrice), 0)).toLocaleString('vi-VN')} ₫
                 </h3>
               </div>
            </div>
@@ -735,7 +735,7 @@ export const Inventory: React.FC = () => {
                     )}
                   </div>
                   <div className="text-sm text-slate-400">
-                    Giá nhập: <span className="font-medium text-slate-300">{item.importPrice.toLocaleString()} ₫</span>
+                    Giá nhập: <span className="font-medium text-slate-300">{item.importPrice.toLocaleString('vi-VN')} ₫</span>
                   </div>
                 </div>
               </div>

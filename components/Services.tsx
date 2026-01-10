@@ -262,6 +262,14 @@ const CategorySidebar: React.FC<{
   );
 };
 
+// Utility for formatting price with dấu chấm separator
+const formatPrice = (amount: number | string | undefined | null): string => {
+  if (amount === undefined || amount === null) return '0';
+  const numValue = typeof amount === 'string' ? parseFloat(amount) : amount;
+  if (isNaN(numValue)) return '0';
+  return numValue.toLocaleString('vi-VN');
+};
+
 export const Services: React.FC = () => {
   const [filter, setFilter] = useState<FilterState>({ locNhanh: 'all', thoiGian: { tuNgay: null, denNgay: null } });
   const [searchText, setSearchText] = useState('');
@@ -468,11 +476,11 @@ export const Services: React.FC = () => {
   // Load services from Supabase
   const loadServices = async () => {
     try {
+      // Load services without order by to avoid column issues
       const { data, error } = await supabase
         .from(DB_TABLES.SERVICES)
         .select('id, ten_dich_vu, cap_1, cap_2, cap_3, cap_4, gia_niem_yet, mo_ta, anh_dich_vu, id_quy_trinh, cac_buoc_quy_trinh')
-        .order('ngay_tao', { ascending: false })
-        .limit(50); // Giảm limit để tăng tốc độ tối đa
+        .limit(100);
 
       if (error) {
         console.error('Lỗi khi load services:', error);
@@ -491,16 +499,30 @@ export const Services: React.FC = () => {
         // Lấy category từ categoryPath (join bằng ' > ') hoặc để trống
         const category = categoryPath.length > 0 ? categoryPath.join(' > ') : '';
         
-        const mappedService = {
+        // Parse workflows if it's a JSONB array or string
+        let workflows: { id: string; order: number }[] | undefined = undefined;
+        if (svc.cac_buoc_quy_trinh) {
+          try {
+            if (typeof svc.cac_buoc_quy_trinh === 'string') {
+              workflows = JSON.parse(svc.cac_buoc_quy_trinh);
+            } else if (Array.isArray(svc.cac_buoc_quy_trinh)) {
+              workflows = svc.cac_buoc_quy_trinh;
+            }
+          } catch (e) {
+            console.warn('Error parsing workflows for service:', svc.id, e);
+          }
+        }
+        
+        const mappedService: ServiceCatalogItem = {
           id: svc.id,
           name: svc.ten_dich_vu || '',
           category: category,
           categoryPath: categoryPath,
-          price: svc.gia_niem_yet || 0,
+          price: parseFloat(svc.gia_niem_yet) || 0,
           desc: svc.mo_ta || '',
           image: svc.anh_dich_vu || '',
           workflowId: svc.id_quy_trinh || '',
-          workflows: svc.cac_buoc_quy_trinh || undefined
+          workflows: workflows
         };
         
         return mappedService;
@@ -559,12 +581,16 @@ export const Services: React.FC = () => {
   useEffect(() => {
     const loadWorkflows = async () => {
       try {
+        // Load workflows without order by to avoid column issues
         const { data, error } = await supabase
           .from(DB_TABLES.WORKFLOWS)
           .select('*')
-          .order('ngay_tao', { ascending: false });
+          .limit(100);
 
-        if (error) throw error;
+        if (error) {
+          console.error('Error loading workflows:', error);
+          throw error;
+        }
 
         // Map từ tên cột tiếng Việt sang interface
         const workflowsList: WorkflowDefinition[] = (data || []).map((wf: any) => ({
@@ -726,7 +752,7 @@ export const Services: React.FC = () => {
           </div>
         </td>
         <td className="p-2 text-right font-bold text-gold-400 text-sm">
-          {service.price.toLocaleString()} ₫
+          {formatPrice(service.price)} ₫
         </td>
         <td className="p-2 sticky right-0 bg-neutral-900/95 backdrop-blur-sm group-hover:bg-neutral-800 transition-colors z-20">
           <ActionMenu
@@ -789,7 +815,7 @@ export const Services: React.FC = () => {
         .map(w => workflows.find(wf => wf.id === w.id)?.label)
         .filter(Boolean);
 
-      alert(`Thêm dịch vụ thành công!\n\nID: ${serviceId}\nTên: ${newService.name}\nDanh mục: ${newService.category}\nGiá: ${parseFloat(newService.price).toLocaleString()} ₫\nQuy trình: ${workflowLabels.join(' → ')}\n\nĐã lưu vào Supabase!`);
+      alert(`Thêm dịch vụ thành công!\n\nID: ${serviceId}\nTên: ${newService.name}\nDanh mục: ${newService.category}\nGiá: ${formatPrice(parseFloat(newService.price))} ₫\nQuy trình: ${workflowLabels.join(' → ')}\n\nĐã lưu vào Supabase!`);
 
       setNewService({
         name: '',
@@ -914,7 +940,7 @@ export const Services: React.FC = () => {
         .map(w => workflows.find(wf => wf.id === w.id)?.label)
         .filter(Boolean);
 
-      alert(`Cập nhật dịch vụ thành công!\n\nTên: ${newService.name}\nDanh mục: ${newService.category}\nGiá: ${parseFloat(newService.price).toLocaleString()} ₫\nQuy trình: ${workflowLabels.join(' → ')}\n\nĐã lưu vào Supabase!`);
+      alert(`Cập nhật dịch vụ thành công!\n\nTên: ${newService.name}\nDanh mục: ${newService.category}\nGiá: ${formatPrice(parseFloat(newService.price))} ₫\nQuy trình: ${workflowLabels.join(' → ')}\n\nĐã lưu vào Supabase!`);
 
       setNewService({
         name: '',
@@ -1180,7 +1206,7 @@ export const Services: React.FC = () => {
                       <span className="font-mono text-slate-600 text-sm">#{selectedService.id}</span>
                     </div>
                     <div className="font-bold text-2xl text-gold-500">
-                      {selectedService.price.toLocaleString()} ₫
+                      {formatPrice(selectedService.price)} ₫
                     </div>
                   </div>
                 </div>
@@ -2043,7 +2069,7 @@ export const Services: React.FC = () => {
                           </div>
                         </td>
                         <td className="p-4 text-right font-bold text-gold-400">
-                          {service.price.toLocaleString()} ₫
+                          {formatPrice(service.price)} ₫
                         </td>
                         <td className="p-4 sticky right-0 bg-neutral-900/95 backdrop-blur-sm group-hover:bg-neutral-800 transition-colors z-20">
                           <ActionMenu

@@ -46,6 +46,77 @@ const mapStatusToVietnamese = (status: string): string => {
   return statusMap[status] || status || 'Chưa xác định';
 };
 
+// Utility for formatting date (only date, no time)
+const formatDate = (date: string | Date | undefined | null): string => {
+  if (!date) return '';
+  try {
+    let dateObj: Date;
+    
+    if (typeof date === 'string') {
+      // Handle ISO string format: 2026-01-17T00:00:00+00:00 or 2026-01-17
+      // Extract just the date part before 'T' if exists to avoid timezone issues
+      const datePart = date.split('T')[0];
+      
+      // If it's in format YYYY-MM-DD, parse it correctly (local time, no timezone conversion)
+      if (datePart.match(/^\d{4}-\d{2}-\d{2}$/)) {
+        const [year, month, day] = datePart.split('-').map(Number);
+        dateObj = new Date(year, month - 1, day); // month is 0-indexed, creates date in local time
+      } else {
+        // Try parsing as normal date string
+        dateObj = new Date(date);
+      }
+    } else {
+      dateObj = date;
+    }
+    
+    if (isNaN(dateObj.getTime())) {
+      // If invalid date, try to parse Vietnamese date format (dd/mm/yyyy)
+      if (typeof date === 'string') {
+        const parts = date.split('/');
+        if (parts.length === 3) {
+          const day = parseInt(parts[0]);
+          const month = parseInt(parts[1]) - 1;
+          const year = parseInt(parts[2]);
+          const parsedDate = new Date(year, month, day);
+          if (!isNaN(parsedDate.getTime())) {
+            return parsedDate.toLocaleDateString('vi-VN', { 
+              day: '2-digit', 
+              month: '2-digit', 
+              year: 'numeric' 
+            });
+          }
+        }
+      }
+      // If all parsing fails, try to extract date part from ISO string
+      if (typeof date === 'string' && date.includes('T')) {
+        const datePart = date.split('T')[0];
+        const [year, month, day] = datePart.split('-');
+        if (year && month && day) {
+          return `${day}/${month}/${year}`;
+        }
+      }
+      return date.toString(); // Return original if all parsing fails
+    }
+    
+    // Format to Vietnamese date format (dd/mm/yyyy) - no timezone conversion
+    const day = String(dateObj.getDate()).padStart(2, '0');
+    const month = String(dateObj.getMonth() + 1).padStart(2, '0');
+    const year = dateObj.getFullYear();
+    return `${day}/${month}/${year}`;
+  } catch (error) {
+    console.error('Error formatting date:', error, date);
+    // Fallback: try to extract date part from ISO string
+    if (typeof date === 'string' && date.includes('T')) {
+      const datePart = date.split('T')[0];
+      const [year, month, day] = datePart.split('-');
+      if (year && month && day) {
+        return `${day}/${month}/${year}`;
+      }
+    }
+    return typeof date === 'string' ? date : '';
+  }
+};
+
 // Helper to get workflow stages from serviceId (now accepts workflows and services parameters)
 const getWorkflowStages = (serviceId?: string, workflows?: WorkflowDefinition[], services?: ServiceCatalogItem[]) => {
   if (!serviceId) {
@@ -106,12 +177,52 @@ const getWorkflowStages = (serviceId?: string, workflows?: WorkflowDefinition[],
     }
   }
 
+  // If service doesn't have workflowId, try to find workflow by service type/category
+  if (!workflowId && service.category) {
+    console.log('🔍 getWorkflowStages: Service has no workflowId, trying to find by category/type:', service.category);
+    // Try to find workflow that matches service category or type
+    for (const wf of (workflows || [])) {
+      if (wf.types && Array.isArray(wf.types)) {
+        const categoryLower = service.category.toLowerCase();
+        const hasMatchingType = wf.types.some(t => 
+          t.toLowerCase().includes(categoryLower) ||
+          categoryLower.includes(t.toLowerCase())
+        );
+        
+        if (hasMatchingType && wf.stages && wf.stages.length > 0) {
+          workflowId = wf.id;
+          console.log('✅ getWorkflowStages: Found workflow by service category:', {
+            serviceCategory: service.category,
+            workflowId: wf.id,
+            workflowLabel: wf.label,
+            workflowTypes: wf.types
+          });
+          break;
+        }
+      }
+    }
+  }
+
   if (!workflowId) {
     console.warn('⚠️ getWorkflowStages: No workflowId found for service:', {
       serviceId,
-      serviceName: service.name
+      serviceName: service.name,
+      serviceCategory: service.category
     });
-    return null;
+    // Last resort: try to find any workflow with stages
+    for (const wf of (workflows || [])) {
+      if (wf.stages && wf.stages.length > 0) {
+        workflowId = wf.id;
+        console.log('✅ getWorkflowStages: Using fallback workflow (first available):', {
+          workflowId: wf.id,
+          workflowLabel: wf.label
+        });
+        break;
+      }
+    }
+    if (!workflowId) {
+      return null;
+    }
   }
 
   // Find workflow from provided workflows
@@ -305,7 +416,6 @@ export const TechnicianView: React.FC = () => {
         const { data: workflowsData, error: workflowsError } = await supabase
           .from(DB_PATHS.WORKFLOWS)
           .select('id, ten_quy_trinh, mo_ta, phong_ban_phu_trach, loai_ap_dung, vat_tu_can_thiet, nhan_vien_duoc_giao')
-          .order('ngay_tao', { ascending: false })
           .limit(100);
 
         if (workflowsError) throw workflowsError;
@@ -314,7 +424,7 @@ export const TechnicianView: React.FC = () => {
         const { data: stagesData, error: stagesError } = await supabase
           .from(DB_PATHS.WORKFLOW_STAGES)
           .select('id, id_quy_trinh, ten_buoc, thu_tu, chi_tiet, tieu_chuan, nhan_vien_duoc_giao')
-          .order('id_quy_trinh, thu_tu', { ascending: true });
+          .order('thu_tu', { ascending: true });
 
         if (stagesError) throw stagesError;
 
@@ -419,6 +529,15 @@ export const TechnicianView: React.FC = () => {
         // Group stages by workflow ID
         const stagesByWorkflow = new Map<string, any[]>();
         (stagesData || []).forEach((stage: any) => {
+          // Skip stages without workflow ID
+          if (!stage.id_quy_trinh) {
+            console.warn('⚠️ Stage missing id_quy_trinh:', {
+              stageId: stage.id,
+              stageName: stage.ten_buoc
+            });
+            return;
+          }
+
           if (!stagesByWorkflow.has(stage.id_quy_trinh)) {
             stagesByWorkflow.set(stage.id_quy_trinh, []);
           }
@@ -428,6 +547,7 @@ export const TechnicianView: React.FC = () => {
           const hasTodosInTasksByStage = !!tasksByStage[stage.id];
           console.log(`🔍 Checking todos for stage "${stage.ten_buoc}" (${stage.id}):`, {
             stageId: stage.id,
+            workflowId: stage.id_quy_trinh,
             hasTodosInTasksByStage,
             todosCount: stageTodos.length,
             availableStageIds: Object.keys(tasksByStage),
@@ -437,7 +557,7 @@ export const TechnicianView: React.FC = () => {
           const stageData = {
             id: stage.id,
             name: stage.ten_buoc,
-            order: stage.thu_tu,
+            order: stage.thu_tu || 0, // Default to 0 if thu_tu is missing
             details: stage.chi_tiet || undefined,
             standards: stage.tieu_chuan || undefined,
             todos: stageTodos.length > 0 ? stageTodos : undefined, // Chỉ set todos nếu có ít nhất 1 todo
@@ -448,10 +568,16 @@ export const TechnicianView: React.FC = () => {
           
           // Debug log for each stage
           if (stageTodos.length > 0) {
-            console.log(`✅ Stage "${stage.ten_buoc}" (${stage.id}) has ${stageTodos.length} todos:`, stageTodos);
+            console.log(`✅ Stage "${stage.ten_buoc}" (${stage.id}) in workflow "${stage.id_quy_trinh}" has ${stageTodos.length} todos:`, stageTodos);
           } else {
-            console.log(`⚠️ Stage "${stage.ten_buoc}" (${stage.id}) has NO todos. Available stage IDs with tasks:`, Object.keys(tasksByStage));
+            console.log(`⚠️ Stage "${stage.ten_buoc}" (${stage.id}) in workflow "${stage.id_quy_trinh}" has NO todos. Available stage IDs with tasks:`, Object.keys(tasksByStage));
           }
+        });
+
+        // Sort stages by order (thu_tu) for each workflow
+        stagesByWorkflow.forEach((stages, workflowId) => {
+          stages.sort((a, b) => (a.order || 0) - (b.order || 0));
+          console.log(`✅ Sorted ${stages.length} stages for workflow ${workflowId}:`, stages.map(s => ({ id: s.id, name: s.name, order: s.order })));
         });
 
         // Map workflows với stages
@@ -465,6 +591,22 @@ export const TechnicianView: React.FC = () => {
           stages: stagesByWorkflow.get(wf.id) || undefined,
           assignedMembers: wf.nhan_vien_duoc_giao || undefined
         } as WorkflowDefinition));
+
+        console.log('✅ TechnicianView - Workflows loaded:', {
+          workflowsCount: workflowsList.length,
+          workflowsWithStages: workflowsList.filter(wf => wf.stages && wf.stages.length > 0).length,
+          workflows: workflowsList.map(wf => ({
+            id: wf.id,
+            label: wf.label,
+            stagesCount: wf.stages?.length || 0,
+            stageIds: wf.stages?.map(s => s.id) || [],
+            stageNames: wf.stages?.map(s => s.name) || [],
+            types: wf.types,
+            hasStages: !!wf.stages && wf.stages.length > 0,
+            department: wf.department
+          })),
+          totalStages: workflowsList.reduce((sum, wf) => sum + (wf.stages?.length || 0), 0)
+        });
 
         setWorkflows(workflowsList);
       } catch (error) {
@@ -643,7 +785,7 @@ export const TechnicianView: React.FC = () => {
 
   // Flatten orders to tasks assigned to me (Simulated logic: In a real app, we filter by assignee. Here we show all active items)
   const myTasks: FlatTask[] = useMemo(() => {
-    return orders.flatMap(order =>
+    const tasks = orders.flatMap(order =>
       order.items
         .filter(item => !item.isProduct && item.status !== 'Done' && item.status !== 'Delivered') // Filter out finished/products
         .map(item => ({
@@ -655,6 +797,23 @@ export const TechnicianView: React.FC = () => {
           orderNotes: order.notes
         }))
     );
+    
+    console.log('📋 TechnicianView - myTasks created:', {
+      totalTasks: tasks.length,
+      tasks: tasks.map(t => ({
+        id: t.id,
+        name: t.name,
+        serviceId: t.serviceId,
+        workflowId: t.workflowId,
+        status: t.status,
+        orderId: t.orderId
+      })),
+      tasksWithServiceId: tasks.filter(t => !!t.serviceId).length,
+      tasksWithWorkflowId: tasks.filter(t => !!t.workflowId).length,
+      tasksWithoutBoth: tasks.filter(t => !t.serviceId && !t.workflowId).length
+    });
+    
+    return tasks;
   }, [orders]);
 
   // Generate filter options from all workflow stages
@@ -747,29 +906,146 @@ export const TechnicianView: React.FC = () => {
       taskId: activeTask.id,
       taskName: activeTask.name,
       serviceId: activeTask.serviceId,
+      workflowId: activeTask.workflowId,
       taskStatus: activeTask.status,
       workflowsCount: workflows.length,
       servicesCount: services.length,
-      availableServiceIds: services.map(s => s.id).slice(0, 10)
+      availableServiceIds: services.map(s => s.id).slice(0, 10),
+      availableWorkflowIds: workflows.map(w => w.id).slice(0, 10)
     });
 
-    const stages = getWorkflowStages(activeTask.serviceId, workflows, services);
+    // Try to find workflow directly from item.workflowId first
+    let stages: WorkflowStage[] | null = null;
+    
+    if (activeTask.workflowId) {
+      const workflow = workflows.find(w => w && w.id === activeTask.workflowId);
+      if (workflow && workflow.stages && workflow.stages.length > 0) {
+        stages = workflow.stages.sort((a, b) => (a.order || 0) - (b.order || 0));
+        console.log('✅ TechnicianView: Found workflow by item.workflowId:', {
+          workflowId: activeTask.workflowId,
+          workflowLabel: workflow.label,
+          stagesCount: stages.length
+        });
+      } else {
+        console.warn('⚠️ TechnicianView: Workflow not found or has no stages:', {
+          workflowId: activeTask.workflowId,
+          workflowFound: !!workflow,
+          hasStages: workflow?.stages?.length || 0
+        });
+      }
+    }
+
+    // If not found, try to get from serviceId
+    if (!stages && activeTask.serviceId) {
+      console.log('🔍 Trying to get workflow from serviceId:', activeTask.serviceId);
+      stages = getWorkflowStages(activeTask.serviceId, workflows, services);
+    }
+
+    // If still no stages, try to find workflow by service type
+    if (!stages && activeTask.type) {
+      console.log('🔍 Trying to find workflow by service type:', activeTask.type);
+      // Map service type to workflow types
+      const typeMapping: Record<string, string[]> = {
+        'Repair': ['sua_chua', 'repair', 'Repair'],
+        'Cleaning': ['ve_sinh', 'cleaning', 'Cleaning'],
+        'Plating': ['xi_ma', 'plating', 'Plating'],
+        'Dyeing': ['nhuom', 'dyeing', 'Dyeing'],
+        'Custom': ['custom', 'Custom']
+      };
+      
+      const matchingTypes = typeMapping[activeTask.type] || [activeTask.type.toLowerCase()];
+      
+      // Find workflow that has matching type in loai_ap_dung
+      for (const wf of workflows) {
+        if (wf.types && Array.isArray(wf.types)) {
+          const hasMatchingType = wf.types.some(t => 
+            matchingTypes.includes(t.toLowerCase()) || 
+            matchingTypes.some(mt => t.toLowerCase().includes(mt.toLowerCase()))
+          );
+          
+          if (hasMatchingType && wf.stages && wf.stages.length > 0) {
+            stages = wf.stages.sort((a, b) => (a.order || 0) - (b.order || 0));
+            console.log('✅ Found workflow by matching service type:', {
+              workflowId: wf.id,
+              workflowLabel: wf.label,
+              serviceType: activeTask.type,
+              workflowTypes: wf.types,
+              stagesCount: stages.length
+            });
+            break;
+          }
+        }
+      }
+    }
+
+    // If still no stages, try to find any workflow that matches the status
+    if (!stages && activeTask.status) {
+      console.log('🔍 Trying to find workflow by status:', activeTask.status);
+      // Try to find workflow that has a stage matching the current status
+      for (const wf of workflows) {
+        if (wf.stages && wf.stages.some(s => s.id === activeTask.status)) {
+          stages = wf.stages.sort((a, b) => (a.order || 0) - (b.order || 0));
+          console.log('✅ Found workflow by matching status to stage:', {
+            workflowId: wf.id,
+            workflowLabel: wf.label,
+            stagesCount: stages.length,
+            matchingStageId: activeTask.status
+          });
+          break;
+        }
+      }
+    }
+
+    // If still no stages, try to find any workflow with stages as fallback
+    if (!stages) {
+      console.log('🔍 Trying to find any workflow with stages as fallback');
+      for (const wf of workflows) {
+        if (wf.stages && wf.stages.length > 0) {
+          stages = wf.stages.sort((a, b) => (a.order || 0) - (b.order || 0));
+          console.log('✅ Found workflow as fallback (first available):', {
+            workflowId: wf.id,
+            workflowLabel: wf.label,
+            stagesCount: stages.length
+          });
+          break;
+        }
+      }
+    }
+    
+    // If still no stages, log warning
+    if (!stages) {
+      console.warn('❌ TechnicianView: Could not find workflow stages:', {
+        taskId: activeTask.id,
+        taskName: activeTask.name,
+        serviceId: activeTask.serviceId,
+        workflowId: activeTask.workflowId,
+        serviceType: activeTask.type,
+        status: activeTask.status,
+        workflowsAvailable: workflows.map(w => ({ 
+          id: w.id, 
+          label: w.label, 
+          stagesCount: w.stages?.length || 0,
+          types: w.types
+        })),
+        servicesAvailable: services.map(s => ({ 
+          id: s.id, 
+          name: s.name, 
+          hasWorkflows: !!s.workflows,
+          workflowId: s.workflowId
+        })).slice(0, 5)
+      });
+      return null;
+    }
     
     // Merge todos từ workflows state vào stages
     if (stages && workflows.length > 0) {
       console.log('🔍 Looking for workflow with stages:', {
         stagesCount: stages.length,
         stageIds: stages.map(s => s.id),
-        workflowsCount: workflows.length,
-        workflows: workflows.map(w => ({
-          id: w.id,
-          label: w.label,
-          stagesCount: w.stages?.length || 0,
-          stageIds: w.stages?.map(s => s.id) || []
-        }))
+        workflowsCount: workflows.length
       });
       
-      // Tìm workflow chứa các stages này - kiểm tra bằng workflowId từ activeTask
+      // Tìm workflow chứa các stages này
       let workflow = null;
       
       // Thử tìm workflow bằng workflowId từ activeTask
@@ -784,7 +1060,11 @@ export const TechnicianView: React.FC = () => {
       
       // Nếu không tìm thấy, thử tìm bằng cách match stage IDs
       if (!workflow) {
-        workflow = workflows.find(w => w.stages?.some(s => stages.some(st => st.id === s.id)));
+        workflow = workflows.find(w => {
+          if (!w.stages) return false;
+          const stageIds = new Set(w.stages.map(s => s.id));
+          return stages.some(st => stageIds.has(st.id));
+        });
         console.log('🔍 Looking for workflow by stage IDs:', {
           found: !!workflow,
           workflowLabel: workflow?.label
@@ -824,19 +1104,43 @@ export const TechnicianView: React.FC = () => {
       }
     }
     
-    console.log('✅ TechnicianView: Final workflow stages with todos:', {
-      serviceId: activeTask.serviceId,
-      taskStatus: activeTask.status,
-      stagesFound: stages ? stages.length : 0,
-      stages: stages?.map(s => ({ 
-        id: s.id, 
-        name: s.name, 
-        order: s.order,
-        hasTodos: !!s.todos,
-        todosCount: s.todos?.length || 0,
-        todos: s.todos?.map((t: any) => ({ id: t.id, title: t.title, completed: t.completed }))
-      }))
-    });
+    if (stages && stages.length > 0) {
+      console.log('✅ TechnicianView: Final workflow stages with todos:', {
+        serviceId: activeTask.serviceId,
+        workflowId: activeTask.workflowId,
+        taskStatus: activeTask.status,
+        stagesFound: stages.length,
+        stages: stages.map(s => ({ 
+          id: s.id, 
+          name: s.name, 
+          order: s.order,
+          hasTodos: !!s.todos,
+          todosCount: s.todos?.length || 0,
+          todos: s.todos?.map((t: any) => ({ id: t.id, title: t.title, completed: t.completed }))
+        }))
+      });
+    } else {
+      console.warn('❌ TechnicianView: Could not find workflow stages:', {
+        taskId: activeTask.id,
+        taskName: activeTask.name,
+        serviceId: activeTask.serviceId,
+        workflowId: activeTask.workflowId,
+        status: activeTask.status,
+        workflowsAvailable: workflows.map(w => ({ 
+          id: w.id, 
+          label: w.label, 
+          stagesCount: w.stages?.length || 0,
+          stageIds: w.stages?.map(s => s.id) || []
+        })),
+        servicesAvailable: services.map(s => ({ 
+          id: s.id, 
+          name: s.name, 
+          hasWorkflows: !!s.workflows,
+          workflowsCount: s.workflows?.length || 0,
+          workflowId: s.workflowId
+        })).slice(0, 5)
+      });
+    }
 
     return stages;
   }, [activeTask, workflows, services]);
@@ -1340,7 +1644,7 @@ export const TechnicianView: React.FC = () => {
                   <div className="flex justify-between items-center text-sm text-slate-500 mt-2">
                     {/* Bỏ hiển thị status ID (UUID) - chỉ hiển thị expected delivery */}
                     <span className="text-xs flex items-center gap-1">
-                      <Clock size={10} /> {task.expectedDelivery}
+                      <Clock size={10} /> {formatDate(task.expectedDelivery) || 'Chưa có'}
                     </span>
                   </div>
                 </div>

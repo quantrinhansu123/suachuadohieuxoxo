@@ -35,11 +35,14 @@ const supabaseOptions: SupabaseClientOptions<'public'> = {
       });
     },
   },
-  // Tối ưu realtime
+  // Tối ưu realtime - handle WebSocket errors gracefully
   realtime: {
     params: {
       eventsPerSecond: 10,
     },
+    // Disable realtime nếu có vấn đề với WebSocket
+    // Có thể bật lại sau khi fix WebSocket issues
+    // log_level: 'info',
   },
 };
 

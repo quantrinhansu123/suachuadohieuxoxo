@@ -70,6 +70,8 @@ export interface ServiceItem {
   history?: TaskHistory[];
   lastUpdated?: number;
   technicalLog?: TechnicalLog[]; // Added for persistent notes between stages
+  notes?: string; // Ghi chú cho item
+  assignedMembers?: string[]; // Danh sách ID nhân sự phụ trách item
 }
 
 export interface Order {
@@ -83,6 +85,8 @@ export interface Order {
   createdAt: string;
   expectedDelivery: string;
   notes?: string;
+  discount?: number; // Khấu trừ (giảm giá)
+  additionalFees?: number; // Phụ phí phát sinh
 }
 
 export interface CRMTask {

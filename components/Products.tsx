@@ -653,7 +653,7 @@ export const Products: React.FC = () => {
                   <span className="text-xs font-medium text-slate-300">{product.stock.toLocaleString('vi-VN')} sản phẩm</span>
                 </div>
                 <div className="font-bold text-lg text-gold-500">
-                  {product.price.toLocaleString()} ₫
+                  {product.price.toLocaleString('vi-VN')} ₫
                 </div>
               </div>
             </div>

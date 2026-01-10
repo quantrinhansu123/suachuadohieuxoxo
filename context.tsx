@@ -142,8 +142,8 @@ export const AppProvider: React.FC<{ children: ReactNode }> = ({ children }) => 
   const mapVietnameseOrderToEnglish = (vnOrder: any): Order => {
     return {
       id: vnOrder.ma_don_hang || vnOrder.id,
-      customerId: vnOrder.ma_khach_hang || vnOrder.customerId,
-      customerName: vnOrder.ten_khach_hang || vnOrder.customerName,
+      customerId: vnOrder.id_khach_hang || vnOrder.ma_khach_hang || vnOrder.customerId || '',
+      customerName: vnOrder.ten_khach_hang || vnOrder.customerName || '',
       items: (vnOrder.danh_sach_dich_vu || vnOrder.items || []).map((item: any) => ({
         id: item.ma_item || item.id,
         name: item.ten_hang_muc || item.ten || item.name,
@@ -159,14 +159,20 @@ export const AppProvider: React.FC<{ children: ReactNode }> = ({ children }) => 
         workflowId: item.id_quy_trinh || item.workflowId,
         history: item.lich_su_thuc_hien || item.history,
         lastUpdated: item.cap_nhat_cuoi || item.lastUpdated,
-        technicalLog: item.nhat_ky_ky_thuat || item.technicalLog
+        technicalLog: item.nhat_ky_ky_thuat || item.technicalLog,
+        notes: item.ghi_chu || item.notes || undefined,
+        assignedMembers: (item.nhan_vien_phu_trach && Array.isArray(item.nhan_vien_phu_trach)) 
+          ? item.nhan_vien_phu_trach 
+          : (typeof item.nhan_vien_phu_trach === 'string' ? [item.nhan_vien_phu_trach] : undefined) || item.assignedMembers
       })),
-      totalAmount: vnOrder.tong_tien || vnOrder.totalAmount,
-      deposit: vnOrder.dat_coc || vnOrder.deposit,
+      totalAmount: vnOrder.tong_tien || vnOrder.totalAmount || 0,
+      deposit: vnOrder.tien_coc || vnOrder.dat_coc || vnOrder.deposit || 0,
       status: mapOrderStatusDbToDisplay(vnOrder.trang_thai || vnOrder.status),
-      createdAt: vnOrder.ngay_tao || vnOrder.createdAt,
-      expectedDelivery: vnOrder.ngay_giao_du_kien || vnOrder.expectedDelivery,
-      notes: vnOrder.ghi_chu || vnOrder.notes
+      createdAt: vnOrder.ngay_tao || vnOrder.createdAt || new Date().toLocaleDateString('vi-VN'),
+      expectedDelivery: vnOrder.ngay_du_kien_giao || vnOrder.ngay_giao_du_kien || vnOrder.expectedDelivery || '',
+      notes: vnOrder.ghi_chu || vnOrder.notes,
+      discount: vnOrder.giam_gia || vnOrder.discount || undefined,
+      additionalFees: vnOrder.phi_phat_sinh || vnOrder.additionalFees || undefined
     };
   };
 
@@ -356,33 +362,139 @@ export const AppProvider: React.FC<{ children: ReactNode }> = ({ children }) => 
 
   // --- 1. Load dữ liệu từ Supabase (Realtime) ---
   const loadOrders = async () => {
+    console.log('🔄 Starting to load orders...');
     try {
-      // Load orders và items song song (tối ưu: giảm limit và chỉ select cần thiết)
-      const [ordersResult, itemsResult] = await Promise.all([
-        supabase
-          .from(DB_TABLES.ORDERS)
-          .select('id, id_khach_hang, ten_khach_hang, tong_tien, tien_coc, trang_thai, ngay_du_kien_giao, ghi_chu, ngay_tao')
-          .order('ngay_tao', { ascending: false })
-          .limit(20), // Giảm xuống 20 để tăng tốc độ
-        supabase
-          .from(DB_TABLES.SERVICE_ITEMS)
-          .select('id, id_don_hang, ten_hang_muc, loai, don_gia, so_luong, trang_thai, id_ky_thuat_vien, la_san_pham, id_dich_vu_goc, id_quy_trinh, anh_truoc, anh_sau, lich_su_thuc_hien, nhat_ky_ky_thuat, cap_nhat_cuoi')
-          .limit(100) // Giảm xuống 100 để tăng tốc độ
-      ]);
+      // Load orders - only select columns that exist in database
+      console.log('📡 Querying orders from:', DB_TABLES.ORDERS);
+      const ordersResult = await supabase
+        .from(DB_TABLES.ORDERS)
+        .select('id, id_khach_hang, ten_khach_hang, tong_tien, tien_coc, trang_thai, ngay_du_kien_giao, ghi_chu')
+        .limit(100);
 
       if (ordersResult.error) {
-        console.error('Error loading orders:', ordersResult.error);
-        throw ordersResult.error;
+        console.error('❌ Error loading orders:', {
+          error: ordersResult.error,
+          code: ordersResult.error.code,
+          message: ordersResult.error.message,
+          details: ordersResult.error.details,
+          hint: ordersResult.error.hint,
+          table: DB_TABLES.ORDERS
+        });
+        setOrders([]);
+        return; // Don't throw, just return empty
       }
+
+      console.log('📦 Orders data loaded from database:', {
+        count: ordersResult.data?.length || 0,
+        isNull: ordersResult.data === null,
+        isUndefined: ordersResult.data === undefined,
+        isArray: Array.isArray(ordersResult.data),
+        orders: ordersResult.data ? (ordersResult.data || []).slice(0, 3).map(o => ({
+          id: o.id,
+          customerName: o.ten_khach_hang,
+          status: o.trang_thai
+        })) : []
+      });
+
+      // Load items separately - only select columns that exist
+      const itemsResult = await supabase
+        .from(DB_TABLES.SERVICE_ITEMS)
+        .select('id, id_don_hang, ten_hang_muc, loai, don_gia, so_luong, trang_thai, id_ky_thuat_vien, la_san_pham, id_dich_vu_goc, id_quy_trinh, anh_truoc, anh_sau, lich_su_thuc_hien, nhat_ky_ky_thuat, cap_nhat_cuoi, phan_cong_tasks')
+        .limit(500);
       
       if (itemsResult.error) {
         console.error('Error loading service items:', itemsResult.error);
-        // Vẫn tiếp tục với orders, chỉ không có items
+        console.warn('Continuing with orders without items');
       }
+
+      // Load services to link serviceId → workflowId
+      console.log('🔗 Loading services to link workflows...');
+      const { data: servicesData, error: servicesError } = await supabase
+        .from(DB_TABLES.SERVICES)
+        .select('id, id_quy_trinh, workflows, cac_buoc_quy_trinh, workflowId, ma_dich_vu')
+        .limit(500);
+
+      if (servicesError) {
+        console.warn('⚠️ Error loading services for workflow linking:', servicesError);
+      }
+
+      // Create serviceId → workflowId map
+      const serviceWorkflowMap = new Map<string, string>();
+      if (servicesData && Array.isArray(servicesData)) {
+        servicesData.forEach((service: any) => {
+          const serviceId = service.id || service.ma_dich_vu;
+          if (!serviceId) return;
+
+          // Try to get workflowId from service
+          let workflowId: string | undefined;
+
+          // Priority 1: Check workflows array (new format)
+          if (service.workflows && Array.isArray(service.workflows) && service.workflows.length > 0) {
+            // Sort by order and get first one
+            const sortedWorkflows = [...service.workflows].sort((a: any, b: any) => (a.order || 0) - (b.order || 0));
+            workflowId = sortedWorkflows[0].id;
+          }
+          // Priority 2: Check id_quy_trinh (database column)
+          else if (service.id_quy_trinh) {
+            workflowId = service.id_quy_trinh;
+          }
+          // Priority 3: Check workflows from cac_buoc_quy_trinh
+          else if (service.cac_buoc_quy_trinh && Array.isArray(service.cac_buoc_quy_trinh) && service.cac_buoc_quy_trinh.length > 0) {
+            const firstWorkflow = service.cac_buoc_quy_trinh[0];
+            workflowId = firstWorkflow.id || firstWorkflow.id_quy_trinh;
+          }
+          // Priority 4: Check workflowId (old format)
+          else if (service.workflowId) {
+            if (typeof service.workflowId === 'string') {
+              workflowId = service.workflowId;
+            } else if (Array.isArray(service.workflowId) && service.workflowId.length > 0) {
+              workflowId = service.workflowId[0];
+            }
+          }
+
+          if (workflowId) {
+            serviceWorkflowMap.set(serviceId, workflowId);
+          }
+        });
+
+        console.log('✅ Service → Workflow map created:', {
+          servicesCount: servicesData.length,
+          mappedCount: serviceWorkflowMap.size,
+          mappings: Array.from(serviceWorkflowMap.entries()).slice(0, 5).map(([serviceId, workflowId]) => ({
+            serviceId,
+            workflowId
+          }))
+        });
+      }
+
+      // Link serviceId → workflowId for items that don't have workflowId
+      const itemsWithWorkflows = (itemsResult.data || []).map((item: any) => {
+        // If item already has id_quy_trinh (workflowId), keep it
+        if (item.id_quy_trinh) {
+          return item;
+        }
+
+        // If item has serviceId, try to get workflowId from services
+        if (item.id_dich_vu_goc && serviceWorkflowMap.has(item.id_dich_vu_goc)) {
+          const linkedWorkflowId = serviceWorkflowMap.get(item.id_dich_vu_goc);
+          console.log('🔗 Linked workflow for item:', {
+            itemId: item.id,
+            itemName: item.ten_hang_muc,
+            serviceId: item.id_dich_vu_goc,
+            workflowId: linkedWorkflowId
+          });
+          return {
+            ...item,
+            id_quy_trinh: linkedWorkflowId
+          };
+        }
+
+        return item;
+      });
 
       // Group items by order_id
       const itemsByOrder = new Map<string, any[]>();
-      (itemsResult.data || []).forEach((item: any) => {
+      itemsWithWorkflows.forEach((item: any) => {
         const orderId = item.id_don_hang;
         if (orderId) {
           if (!itemsByOrder.has(orderId)) {
@@ -392,27 +504,59 @@ export const AppProvider: React.FC<{ children: ReactNode }> = ({ children }) => 
         }
       });
 
-      console.log('📦 Loaded orders and items:', {
+      console.log('📦 Loaded orders and items (with workflow linking):', {
         ordersCount: (ordersResult.data || []).length,
         itemsCount: (itemsResult.data || []).length,
         itemsByOrderCount: itemsByOrder.size,
         sampleOrder: ordersResult.data?.[0] ? {
           id: ordersResult.data[0].id,
+          customerName: ordersResult.data[0].ten_khach_hang,
+          totalAmount: ordersResult.data[0].tong_tien,
           itemsCount: itemsByOrder.get(ordersResult.data[0].id)?.length || 0
-        } : null
+        } : null,
+        ordersData: ordersResult.data?.slice(0, 3) // Log first 3 orders for debugging
       });
 
       // Map orders với items (bao gồm cả orders không có items)
       const ordersList: Order[] = (ordersResult.data || []).map((order: any) => {
-        return mapVietnameseOrderToEnglish({
-          ...order,
-          danh_sach_dich_vu: itemsByOrder.get(order.id) || []
-        });
+        try {
+          return mapVietnameseOrderToEnglish({
+            ...order,
+            danh_sach_dich_vu: itemsByOrder.get(order.id) || []
+          });
+        } catch (error) {
+          console.error('Error mapping order:', order, error);
+          return null;
+        }
+      }).filter((order): order is Order => order !== null);
+
+      console.log('✅ Mapped orders:', {
+        count: ordersList.length,
+        sample: ordersList[0] ? {
+          id: ordersList[0].id,
+          customerName: ordersList[0].customerName,
+          itemsCount: ordersList[0].items?.length || 0,
+          totalAmount: ordersList[0].totalAmount
+        } : null
       });
 
       setOrders(ordersList);
+      console.log('✅ Set orders state. Orders count:', ordersList.length);
+      
+      if (ordersList.length === 0) {
+        console.warn('⚠️ No orders loaded. Possible reasons:');
+        console.warn('  1. No orders in database');
+        console.warn('  2. RLS (Row Level Security) blocking access');
+        console.warn('  3. Table name mismatch');
+        console.warn('  4. Network/connection error');
+      }
     } catch (error) {
-      console.error('Error loading orders:', error);
+      console.error('❌ Error loading orders (catch):', {
+        error,
+        errorType: typeof error,
+        errorMessage: error instanceof Error ? error.message : String(error),
+        errorStack: error instanceof Error ? error.stack : undefined
+      });
       setOrders([]);
     }
   };
@@ -517,12 +661,14 @@ export const AppProvider: React.FC<{ children: ReactNode }> = ({ children }) => 
   };
 
   useEffect(() => {
+    console.log('🚀 AppProvider useEffect triggered - starting to load data...');
     const startTime = performance.now();
     
     // Set loading = false NGAY LẬP TỨC để UI hiển thị (không block UI)
     setIsLoading(false);
 
     // Load TẤT CẢ data song song cùng lúc (không block UI)
+    console.log('🚀 Starting to load all data in parallel...');
     Promise.allSettled([
       loadOrders(),
       loadInventory(),
@@ -530,53 +676,100 @@ export const AppProvider: React.FC<{ children: ReactNode }> = ({ children }) => 
       loadProducts(),
       loadCustomers()
     ])
-      .then(() => {
+      .then((results) => {
         const totalTime = performance.now() - startTime;
+        console.log('✅ All data loading completed:', {
+          totalTime: `${totalTime.toFixed(2)}ms`,
+          results: results.map((result, index) => {
+            const functionNames = ['loadOrders', 'loadInventory', 'loadMembers', 'loadProducts', 'loadCustomers'];
+            return {
+              function: functionNames[index] || `function_${index}`,
+              status: result.status,
+              rejected: result.status === 'rejected' ? {
+                error: result.reason,
+                message: result.reason instanceof Error ? result.reason.message : String(result.reason),
+                stack: result.reason instanceof Error ? result.reason.stack : undefined
+              } : null
+            };
+          })
+        });
+
+        // Log specifically if orders failed
+        const ordersResult = results[0];
+        if (ordersResult.status === 'rejected') {
+          console.error('❌ loadOrders FAILED:', ordersResult.reason);
+        } else {
+          console.log('✅ loadOrders completed successfully');
+        }
       })
       .catch((err) => {
-        console.error('Error loading data:', err);
+        console.error('❌ Error in Promise.allSettled:', err);
       });
 
-    // Setup real-time listeners SAU KHI load xong (delay 3s để không làm chậm initial load)
+    // Setup real-time listeners SAU KHI load xong (delay 5s để không làm chậm initial load)
+    // Nếu WebSocket fails, app vẫn hoạt động bình thường với polling
     let channel: any = null;
     const setupRealtime = () => {
-      // Debounce function để tránh reload quá nhiều
-      let reloadTimeout: NodeJS.Timeout;
-      const debouncedReload = (fn: () => void) => {
-        clearTimeout(reloadTimeout);
-        reloadTimeout = setTimeout(fn, 3000); // Tăng debounce lên 3s để giảm load
-      };
+      try {
+        console.log('🔄 Setting up realtime subscriptions...');
+        // Debounce function để tránh reload quá nhiều
+        let reloadTimeout: NodeJS.Timeout;
+        const debouncedReload = (fn: () => void) => {
+          clearTimeout(reloadTimeout);
+          reloadTimeout = setTimeout(fn, 3000); // Tăng debounce lên 3s để giảm load
+        };
 
-      channel = supabase
-        .channel('app-changes')
-        .on('postgres_changes', 
-          { event: '*', schema: 'public', table: DB_TABLES.ORDERS },
-          () => debouncedReload(loadOrders)
-        )
-        .on('postgres_changes', 
-          { event: '*', schema: 'public', table: DB_TABLES.SERVICE_ITEMS },
-          () => debouncedReload(loadOrders)
-        )
-        .on('postgres_changes', 
-          { event: '*', schema: 'public', table: DB_TABLES.INVENTORY },
-          () => debouncedReload(loadInventory)
-        )
-        .on('postgres_changes', 
-          { event: '*', schema: 'public', table: DB_TABLES.MEMBERS },
-          () => debouncedReload(loadMembers)
-        )
-        .on('postgres_changes', 
-          { event: '*', schema: 'public', table: DB_TABLES.PRODUCTS },
-          () => debouncedReload(loadProducts)
-        )
-        .on('postgres_changes', 
-          { event: '*', schema: 'public', table: DB_TABLES.CUSTOMERS },
-          () => debouncedReload(loadCustomers)
-        )
-        .subscribe();
+        channel = supabase
+          .channel('app-changes')
+          .on('postgres_changes', 
+            { event: '*', schema: 'public', table: DB_TABLES.ORDERS },
+            () => {
+              console.log('🔄 Realtime: Orders changed, reloading...');
+              debouncedReload(loadOrders);
+            }
+          )
+          .on('postgres_changes', 
+            { event: '*', schema: 'public', table: DB_TABLES.SERVICE_ITEMS },
+            () => {
+              console.log('🔄 Realtime: Service items changed, reloading orders...');
+              debouncedReload(loadOrders);
+            }
+          )
+          .on('postgres_changes', 
+            { event: '*', schema: 'public', table: DB_TABLES.INVENTORY },
+            () => debouncedReload(loadInventory)
+          )
+          .on('postgres_changes', 
+            { event: '*', schema: 'public', table: DB_TABLES.MEMBERS },
+            () => debouncedReload(loadMembers)
+          )
+          .on('postgres_changes', 
+            { event: '*', schema: 'public', table: DB_TABLES.PRODUCTS },
+            () => debouncedReload(loadProducts)
+          )
+          .on('postgres_changes', 
+            { event: '*', schema: 'public', table: DB_TABLES.CUSTOMERS },
+            () => debouncedReload(loadCustomers)
+          )
+          .subscribe((status) => {
+            if (status === 'SUBSCRIBED') {
+              console.log('✅ Realtime subscription successful');
+            } else if (status === 'CHANNEL_ERROR') {
+              console.warn('⚠️ Realtime channel error - app will continue without realtime updates. Data will be loaded on page refresh.');
+            } else if (status === 'TIMED_OUT') {
+              console.warn('⚠️ Realtime subscription timed out - app will continue without realtime updates. Data will be loaded on page refresh.');
+            } else if (status === 'CLOSED') {
+              console.warn('⚠️ Realtime channel closed - will retry on next change');
+            }
+          });
+      } catch (error) {
+        console.warn('⚠️ Error setting up realtime subscriptions (non-critical):', error);
+        console.warn('⚠️ App will continue to work normally - data will be loaded on page refresh.');
+      }
     };
 
     // Setup realtime sau 5 giây để không làm chậm initial load
+    // Nếu WebSocket fails, app vẫn hoạt động bình thường
     const realtimeTimeout = setTimeout(setupRealtime, 5000);
 
     return () => {
@@ -737,7 +930,7 @@ export const AppProvider: React.FC<{ children: ReactNode }> = ({ children }) => 
   const updateOrder = async (orderId: string, updatedOrder: Order) => {
     try {
       // Update order
-      const orderData = {
+      const orderData: any = {
         id_khach_hang: updatedOrder.customerId,
         ten_khach_hang: updatedOrder.customerName,
         tong_tien: updatedOrder.totalAmount,
@@ -746,6 +939,14 @@ export const AppProvider: React.FC<{ children: ReactNode }> = ({ children }) => 
         ngay_du_kien_giao: formatDateForDB(updatedOrder.expectedDelivery),
         ghi_chu: updatedOrder.notes || ''
       };
+      
+      // Add discount and additionalFees if they exist (may not be in schema yet)
+      if (updatedOrder.discount !== undefined && updatedOrder.discount !== null) {
+        orderData.giam_gia = updatedOrder.discount;
+      }
+      if (updatedOrder.additionalFees !== undefined && updatedOrder.additionalFees !== null) {
+        orderData.phi_phat_sinh = updatedOrder.additionalFees;
+      }
 
       const { error: orderError } = await supabase
         .from(DB_TABLES.ORDERS)
@@ -777,9 +978,55 @@ export const AppProvider: React.FC<{ children: ReactNode }> = ({ children }) => 
           if (item.history && item.history.length > 0) itemData.lich_su_thuc_hien = item.history;
           if (item.lastUpdated) itemData.cap_nhat_cuoi = item.lastUpdated;
           if (item.technicalLog && item.technicalLog.length > 0) itemData.nhat_ky_ky_thuat = item.technicalLog;
+          
+          // Add notes and assignedMembers if they exist (may need to add columns to schema)
+          if (item.notes) itemData.ghi_chu = item.notes;
+          if (item.assignedMembers && item.assignedMembers.length > 0) {
+            itemData.nhan_vien_phu_trach = item.assignedMembers;
+          }
 
           return itemData;
         });
+
+        // PRESERVE existing data before upsert: Load current items to preserve history, technicalLog, phan_cong_tasks
+        const { data: existingItemsData } = await supabase
+          .from(DB_TABLES.SERVICE_ITEMS)
+          .select('id, lich_su_thuc_hien, nhat_ky_ky_thuat, cap_nhat_cuoi, phan_cong_tasks, ghi_chu, nhan_vien_phu_trach')
+          .eq('id_don_hang', orderId);
+
+        // Merge preserved data into itemsToUpsert
+        if (existingItemsData) {
+          const existingItemsMap = new Map(existingItemsData.map(item => [item.id, item]));
+          itemsToUpsert.forEach(itemData => {
+            const existing = existingItemsMap.get(itemData.id);
+            if (existing) {
+              // PRESERVE history if not provided in updated item
+              if (!itemData.lich_su_thuc_hien && existing.lich_su_thuc_hien) {
+                itemData.lich_su_thuc_hien = existing.lich_su_thuc_hien;
+              }
+              // PRESERVE technicalLog if not provided
+              if (!itemData.nhat_ky_ky_thuat && existing.nhat_ky_ky_thuat) {
+                itemData.nhat_ky_ky_thuat = existing.nhat_ky_ky_thuat;
+              }
+              // PRESERVE lastUpdated if not provided
+              if (!itemData.cap_nhat_cuoi && existing.cap_nhat_cuoi) {
+                itemData.cap_nhat_cuoi = existing.cap_nhat_cuoi;
+              }
+              // PRESERVE phan_cong_tasks (workflow assignments) - very important!
+              if (!itemData.phan_cong_tasks && existing.phan_cong_tasks) {
+                itemData.phan_cong_tasks = existing.phan_cong_tasks;
+              }
+              // PRESERVE notes if not provided in updated item
+              if (!itemData.ghi_chu && existing.ghi_chu) {
+                itemData.ghi_chu = existing.ghi_chu;
+              }
+              // PRESERVE assignedMembers if not provided
+              if (!itemData.nhan_vien_phu_trach && existing.nhan_vien_phu_trach) {
+                itemData.nhan_vien_phu_trach = existing.nhan_vien_phu_trach;
+              }
+            }
+          });
+        }
 
         // Upsert (insert or update) tất cả items cùng lúc
         const { error: itemsError } = await supabase

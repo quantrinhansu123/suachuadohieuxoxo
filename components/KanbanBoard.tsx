@@ -61,6 +61,77 @@ const removeUndefined = (obj: any): any => {
   return obj;
 };
 
+// Utility for formatting date (only date, no time)
+const formatDate = (date: string | Date | undefined | null): string => {
+  if (!date) return '';
+  try {
+    let dateObj: Date;
+    
+    if (typeof date === 'string') {
+      // Handle ISO string format: 2026-01-17T00:00:00+00:00 or 2026-01-17
+      // Extract just the date part before 'T' if exists to avoid timezone issues
+      const datePart = date.split('T')[0];
+      
+      // If it's in format YYYY-MM-DD, parse it correctly (local time, no timezone conversion)
+      if (datePart.match(/^\d{4}-\d{2}-\d{2}$/)) {
+        const [year, month, day] = datePart.split('-').map(Number);
+        dateObj = new Date(year, month - 1, day); // month is 0-indexed, creates date in local time
+      } else {
+        // Try parsing as normal date string
+        dateObj = new Date(date);
+      }
+    } else {
+      dateObj = date;
+    }
+    
+    if (isNaN(dateObj.getTime())) {
+      // If invalid date, try to parse Vietnamese date format (dd/mm/yyyy)
+      if (typeof date === 'string') {
+        const parts = date.split('/');
+        if (parts.length === 3) {
+          const day = parseInt(parts[0]);
+          const month = parseInt(parts[1]) - 1;
+          const year = parseInt(parts[2]);
+          const parsedDate = new Date(year, month, day);
+          if (!isNaN(parsedDate.getTime())) {
+            return parsedDate.toLocaleDateString('vi-VN', { 
+              day: '2-digit', 
+              month: '2-digit', 
+              year: 'numeric' 
+            });
+          }
+        }
+      }
+      // If all parsing fails, try to extract date part from ISO string
+      if (typeof date === 'string' && date.includes('T')) {
+        const datePart = date.split('T')[0];
+        const [year, month, day] = datePart.split('-');
+        if (year && month && day) {
+          return `${day}/${month}/${year}`;
+        }
+      }
+      return date.toString(); // Return original if all parsing fails
+    }
+    
+    // Format to Vietnamese date format (dd/mm/yyyy) - no timezone conversion
+    const day = String(dateObj.getDate()).padStart(2, '0');
+    const month = String(dateObj.getMonth() + 1).padStart(2, '0');
+    const year = dateObj.getFullYear();
+    return `${day}/${month}/${year}`;
+  } catch (error) {
+    console.error('Error formatting date:', error, date);
+    // Fallback: try to extract date part from ISO string
+    if (typeof date === 'string' && date.includes('T')) {
+      const datePart = date.split('T')[0];
+      const [year, month, day] = datePart.split('-');
+      if (year && month && day) {
+        return `${day}/${month}/${year}`;
+      }
+    }
+    return typeof date === 'string' ? date : '';
+  }
+};
+
 export const KanbanBoard: React.FC = () => {
   const { orders, updateOrderItemStatus, updateOrder, members } = useAppStore();
   const [workflows, setWorkflows] = useState<WorkflowDefinition[]>([]);
@@ -137,25 +208,69 @@ export const KanbanBoard: React.FC = () => {
   // Load workflows from Supabase
   useEffect(() => {
     const loadWorkflows = async () => {
+      console.log('🔄 Starting to load workflows...');
       try {
         // Load workflows
+        console.log('📡 Querying workflows from:', DB_PATHS.WORKFLOWS);
         const { data: workflowsData, error: workflowsError } = await supabase
           .from(DB_PATHS.WORKFLOWS)
           .select('id, ten_quy_trinh, mo_ta, phong_ban_phu_trach, loai_ap_dung, vat_tu_can_thiet, nhan_vien_duoc_giao')
           .limit(100);
 
         if (workflowsError) {
-          console.error('Error loading workflows:', workflowsError);
-          throw workflowsError;
+          console.error('❌ Error loading workflows:', {
+            error: workflowsError,
+            code: workflowsError.code,
+            message: workflowsError.message,
+            hint: workflowsError.hint,
+            details: workflowsError.details,
+            table: DB_PATHS.WORKFLOWS
+          });
+          setWorkflows([]);
+          return; // Don't throw, just return empty
         }
 
-        // Load stages từ database
+        console.log('📋 Loaded workflows data from database:', {
+          count: workflowsData?.length || 0,
+          isNull: workflowsData === null,
+          isUndefined: workflowsData === undefined,
+          isArray: Array.isArray(workflowsData),
+          workflows: workflowsData ? (workflowsData || []).map(wf => ({
+            id: wf.id,
+            label: wf.ten_quy_trinh,
+            types: wf.loai_ap_dung
+          })) : []
+        });
+
+        // If no workflows data, still continue to try loading stages (maybe workflows table is empty)
+        if (!workflowsData || workflowsData.length === 0) {
+          console.warn('⚠️ No workflows found in database. Continuing to load stages anyway...');
+        }
+
+        // Load stages từ database - fix order by syntax
         const { data: stagesData, error: stagesError } = await supabase
           .from(DB_PATHS.WORKFLOW_STAGES)
-          .select('id, id_quy_trinh, ten_buoc, thu_tu, chi_tiet, tieu_chuan, nhan_vien_duoc_giao')
-          .order('id_quy_trinh, thu_tu', { ascending: true });
+          .select('id, id_quy_trinh, ten_buoc, thu_tu, chi_tiet, tieu_chuan, nhan_vien_duoc_giao, mau_sac')
+          .order('thu_tu', { ascending: true });
 
-        if (stagesError) throw stagesError;
+        if (stagesError) {
+          console.error('❌ Error loading stages:', {
+            error: stagesError,
+            code: stagesError.code,
+            message: stagesError.message
+          });
+          // Continue without stages
+        }
+
+        console.log('📊 Loaded stages data:', {
+          count: stagesData?.length || 0,
+          stages: (stagesData || []).slice(0, 5).map(s => ({
+            id: s.id,
+            name: s.ten_buoc,
+            workflowId: s.id_quy_trinh,
+            order: s.thu_tu
+          }))
+        });
 
         // Load tasks từ database
         const stageIds = (stagesData || []).map((s: any) => s.id);
@@ -191,42 +306,89 @@ export const KanbanBoard: React.FC = () => {
         // Group stages by workflow ID
         const stagesByWorkflow = new Map<string, WorkflowStage[]>();
         (stagesData || []).forEach((stage: any) => {
+          if (!stage.id_quy_trinh) {
+            console.warn('⚠️ Stage không có id_quy_trinh:', stage);
+            return;
+          }
           if (!stagesByWorkflow.has(stage.id_quy_trinh)) {
             stagesByWorkflow.set(stage.id_quy_trinh, []);
           }
           stagesByWorkflow.get(stage.id_quy_trinh)!.push({
             id: stage.id, // UUID từ database - QUAN TRỌNG!
             name: stage.ten_buoc,
-            order: stage.thu_tu,
+            order: stage.thu_tu || 0,
             details: stage.chi_tiet || undefined,
             standards: stage.tieu_chuan || undefined,
             todos: tasksByStage[stage.id] || undefined,
-            assignedMembers: stage.nhan_vien_duoc_giao || undefined
+            assignedMembers: (stage.nhan_vien_duoc_giao && Array.isArray(stage.nhan_vien_duoc_giao)) 
+              ? stage.nhan_vien_duoc_giao 
+              : (typeof stage.nhan_vien_duoc_giao === 'string' ? [stage.nhan_vien_duoc_giao] : undefined),
+            color: stage.mau_sac || undefined
           });
         });
+        
+        console.log('📊 Stages grouped by workflow:', {
+          totalStages: stagesData?.length || 0,
+          workflowsWithStages: Array.from(stagesByWorkflow.entries()).map(([wfId, stages]) => ({
+            workflowId: wfId,
+            stagesCount: stages.length,
+            stageNames: stages.map(s => s.name)
+          }))
+        });
 
-        // Map workflows với stages
-        const workflowsList: WorkflowDefinition[] = (workflowsData || []).map((wf: any) => ({
-          id: wf.id,
-          label: wf.ten_quy_trinh || '',
-          description: wf.mo_ta || '',
-          department: wf.phong_ban_phu_trach || 'ky_thuat',
-          types: wf.loai_ap_dung || [],
-          materials: wf.vat_tu_can_thiet || undefined,
-          stages: stagesByWorkflow.get(wf.id) || undefined,
-          assignedMembers: wf.nhan_vien_duoc_giao || undefined
-        } as WorkflowDefinition));
+        // Map workflows với stages - ensure stages are sorted by order
+        const workflowsList: WorkflowDefinition[] = (workflowsData || []).map((wf: any) => {
+          const stages = (stagesByWorkflow.get(wf.id) || []).sort((a, b) => (a.order || 0) - (b.order || 0));
+          return {
+            id: wf.id,
+            label: wf.ten_quy_trinh || '',
+            description: wf.mo_ta || '',
+            department: wf.phong_ban_phu_trach || 'ky_thuat',
+            types: wf.loai_ap_dung || [],
+            materials: wf.vat_tu_can_thiet || undefined,
+            stages: stages.length > 0 ? stages : undefined,
+            assignedMembers: (wf.nhan_vien_duoc_giao && Array.isArray(wf.nhan_vien_duoc_giao))
+              ? wf.nhan_vien_duoc_giao
+              : (typeof wf.nhan_vien_duoc_giao === 'string' ? [wf.nhan_vien_duoc_giao] : undefined)
+          } as WorkflowDefinition;
+        });
 
+        console.log('✅ Mapped workflows list:', {
+          workflowsCount: workflowsList.length,
+          workflowsWithStages: workflowsList.filter(wf => wf.stages && wf.stages.length > 0).length,
+          workflowsWithoutStages: workflowsList.filter(wf => !wf.stages || wf.stages.length === 0).length,
+          workflows: workflowsList.map(wf => ({
+            id: wf.id,
+            label: wf.label,
+            stagesCount: wf.stages?.length || 0,
+            hasStages: !!(wf.stages && wf.stages.length > 0)
+          }))
+        });
+
+        // Always set workflows, even if empty or some don't have stages
         setWorkflows(workflowsList);
+        console.log('✅ Set workflows state. Workflows count:', workflowsList.length);
+        
+        // Verify state was set correctly (this will log in next render)
+        console.log('📊 Workflows loaded and set. Final state will be available on next render.');
       } catch (error) {
-        console.error('Error loading workflows:', error);
+        console.error('❌ Error loading workflows (catch):', {
+          error,
+          errorType: typeof error,
+          errorMessage: error instanceof Error ? error.message : String(error),
+          errorStack: error instanceof Error ? error.stack : undefined
+        });
         setWorkflows([]);
       }
     };
 
-    loadWorkflows();
+    console.log('🚀 useEffect for workflows loading triggered');
+    loadWorkflows().catch(err => {
+      console.error('❌ loadWorkflows promise rejected:', err);
+      setWorkflows([]);
+    });
 
-    // Listen for real-time updates
+    // Listen for real-time updates - reload workflows on change
     const channel = supabase
       .channel('kanban-workflows-changes')
       .on(
@@ -237,26 +399,17 @@ export const KanbanBoard: React.FC = () => {
           table: DB_PATHS.WORKFLOWS,
         },
         async () => {
-          const { data } = await supabase.from(DB_PATHS.WORKFLOWS).select('*');
-          if (data) {
-            const workflowsList: WorkflowDefinition[] = data.map(wf => ({
-              id: wf.id || '',
-              label: wf.label || '',
-              description: wf.description || '',
-              department: wf.department || 'Kỹ Thuật',
-              types: wf.types || [],
-              color: wf.color || 'bg-blue-900/30 text-blue-400 border-blue-800',
-              materials: wf.materials || undefined,
-              stages: wf.stages || undefined,
-              assignedMembers: wf.assignedMembers || undefined
-            } as WorkflowDefinition));
-            setWorkflows(workflowsList);
-          }
+          console.log('🔄 Workflow changed, reloading...');
+          // Reload workflows using the same logic
+          loadWorkflows().catch(err => {
+            console.error('❌ loadWorkflows promise rejected on reload:', err);
+          });
         }
       )
       .subscribe();
 
     return () => {
+      console.log('🧹 Cleaning up workflows channel');
       supabase.removeChannel(channel);
     };
   }, []);
@@ -267,6 +420,12 @@ export const KanbanBoard: React.FC = () => {
       const baseFilter = [
         { id: 'ALL', label: 'Tất cả công việc', types: [] as ServiceType[], color: 'bg-neutral-800 text-slate-400' }
       ];
+
+      // If no workflows loaded, return base filter only
+      if (!workflows || workflows.length === 0) {
+        console.log('⚠️ No workflows loaded, returning base filter only');
+        return baseFilter;
+      }
 
       // Safe orders check
       const safeOrders = Array.isArray(orders) ? orders : [];
@@ -458,12 +617,13 @@ export const KanbanBoard: React.FC = () => {
 
         // If no workflows found from services, show all workflows (fallback)
         if (orderWorkflowIds.size === 0) {
-          console.log('⚠️ No workflows found from services, showing all workflows as fallback');
-          (workflows || []).forEach(wf => {
+          console.log('⚠️ No workflows found from services, showing ALL workflows as fallback');
+          (workflows || []).forEach((wf, index) => {
             if (wf && wf.id) {
               orderWorkflowIds.add(wf.id);
               if (!workflowOrderMap.has(wf.id)) {
-                workflowOrderMap.set(wf.id, 999);
+                // Use index as order to maintain some sorting
+                workflowOrderMap.set(wf.id, index);
               }
             }
           });
@@ -477,92 +637,71 @@ export const KanbanBoard: React.FC = () => {
         // Filter workflows to only include those from services in this order
         // Sort by order from service.workflows
         const assignedWorkflows = (workflows || [])
-          .filter(wf => orderWorkflowIds.has(wf.id))
+          .filter(wf => wf && wf.id && orderWorkflowIds.has(wf.id))
           .sort((a, b) => {
             const orderA = workflowOrderMap.get(a.id) ?? 999;
             const orderB = workflowOrderMap.get(b.id) ?? 999;
             return orderA - orderB;
-          });
+          })
+          .map(wf => ({
+            id: wf.id,
+            label: wf.label || wf.id,
+            types: wf.types || [],
+            color: wf.color || 'bg-neutral-800 text-slate-400'
+          }));
 
         console.log('🎯 Assigned Workflows (filtered & sorted):', {
           count: assignedWorkflows.length,
           workflows: assignedWorkflows.map(w => ({
             id: w.id,
-            label: w.label,
-            order: workflowOrderMap.get(w.id) ?? 999
+            label: w.label
           }))
         });
-        console.log('🎯 All Available Workflows:', (workflows || []).map(w => ({ id: w?.id, label: w?.label })).filter(w => w.id));
+        console.log('🎯 All Available Workflows in system:', (workflows || []).map(w => ({ id: w?.id, label: w?.label })).filter(w => w.id));
+
+        // If no workflows found, show all workflows as fallback
+        if (assignedWorkflows.length === 0) {
+          console.log('⚠️ No assigned workflows found, showing ALL workflows as fallback');
+          const allWorkflowsFallback = (workflows || [])
+            .filter(wf => wf && wf.id)
+            .map((wf, index) => ({
+              id: wf.id,
+              label: wf.label || wf.id,
+              types: wf.types || [],
+              color: wf.color || 'bg-neutral-800 text-slate-400'
+            }));
+          return [...baseFilter, ...allWorkflowsFallback];
+        }
 
         return [...baseFilter, ...assignedWorkflows];
       }
 
-      // If no orders to process, show workflows from all services in all orders
-      console.log('⚠️ No orders to process, getting workflows from all items in all orders');
-      const allWorkflowIds = new Set<string>();
-      const allWorkflowOrderMap = new Map<string, number>(); // workflowId -> order
-
-      safeOrders.forEach(order => {
-        if (order && order.items && Array.isArray(order.items)) {
-          order.items
-            .filter(item => item && !item.isProduct && item.serviceId)
-            .forEach(item => {
-              const service = (services || []).find(s => s && s.id === item.serviceId);
-              if (service && service.workflows && Array.isArray(service.workflows) && service.workflows.length > 0) {
-                service.workflows.forEach(wf => {
-                  // Try to find workflow by ID first
-                  let workflowExists = (workflows || []).find(w => w && w.id === wf.id);
-
-                  // If not found by ID, try flexible matching
-                  if (!workflowExists) {
-                    const wfIdTrimmed = String(wf.id || '').trim();
-                    workflowExists = (workflows || []).find(w => {
-                      const wId = String(w.id || '').trim();
-                      const wLabel = String(w.label || '').trim();
-                      const wfIdLower = wfIdTrimmed.toLowerCase();
-                      const wIdLower = wId.toLowerCase();
-                      const wLabelLower = wLabel.toLowerCase();
-
-                      return wId === wfIdTrimmed ||
-                        wLabel === wfIdTrimmed ||
-                        wIdLower === wfIdLower ||
-                        wLabelLower === wfIdLower ||
-                        wId.includes(wfIdTrimmed) ||
-                        wfIdTrimmed.includes(wId) ||
-                        wLabel.includes(wfIdTrimmed) ||
-                        wfIdTrimmed.includes(wLabel);
-                    });
-                  }
-
-                  if (workflowExists) {
-                    allWorkflowIds.add(workflowExists.id);
-                    // Store order for sorting (use minimum order if workflow appears in multiple services)
-                    const currentOrder = allWorkflowOrderMap.get(workflowExists.id);
-                    if (currentOrder === undefined || wf.order < currentOrder) {
-                      allWorkflowOrderMap.set(workflowExists.id, wf.order);
-                    }
-                  }
-                });
-              }
-            });
-        }
-      });
-
-      // Sort workflows by order from service.workflows
+      // If no orders to process, show ALL workflows (simplified fallback)
+      console.log('⚠️ No orders to process, showing ALL workflows');
       const allWorkflows = (workflows || [])
-        .filter(wf => allWorkflowIds.has(wf.id))
+        .filter(wf => wf && wf.id)
+        .map((wf, index) => ({ ...wf, _order: index }))
         .sort((a, b) => {
-          const orderA = allWorkflowOrderMap.get(a.id) ?? 999;
-          const orderB = allWorkflowOrderMap.get(b.id) ?? 999;
-          return orderA - orderB;
+          // Try to maintain some order if workflows have labels
+          const labelA = (a.label || '').toLowerCase();
+          const labelB = (b.label || '').toLowerCase();
+          if (labelA !== labelB) {
+            return labelA.localeCompare(labelB);
+          }
+          return a._order - b._order;
         });
 
-      console.log('📋 All workflows from all services (sorted):', allWorkflows.map(w => ({
+      console.log('📋 Showing all workflows (no orders):', allWorkflows.map(w => ({
         id: w.id,
-        label: w.label,
-        order: allWorkflowOrderMap.get(w.id) ?? 999
+        label: w.label
       })));
-      return [...baseFilter, ...allWorkflows];
+      
+      return [...baseFilter, ...allWorkflows.map(wf => ({
+        id: wf.id,
+        label: wf.label,
+        types: wf.types || [],
+        color: wf.color || 'bg-neutral-800 text-slate-400'
+      }))];
     } catch (error) {
       console.error('Error in WORKFLOWS_FILTER:', error);
       return [{ id: 'ALL', label: 'Tất cả công việc', types: [] as ServiceType[], color: 'bg-neutral-800 text-slate-400' }];
@@ -583,6 +722,14 @@ export const KanbanBoard: React.FC = () => {
   };
 
   const items: KanbanItem[] = useMemo(() => {
+    // Log workflows state when computing items
+    console.log('🔍 Computing items - workflows state:', {
+      workflowsCount: workflows?.length || 0,
+      workflows: (workflows || []).map(w => ({ id: w.id, label: w.label, stagesCount: w.stages?.length || 0 })),
+      servicesCount: services?.length || 0,
+      ordersCount: orders?.length || 0
+    });
+
     // Helper to check if string is a UUID
     const isUUID = (str: string): boolean => {
       const uuidRegex = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
@@ -593,65 +740,94 @@ export const KanbanBoard: React.FC = () => {
     const normalizeStatusToStageUUID = (item: any, wfId: string | undefined): string => {
       const currentStatus = item.status || 'cho_xu_ly';
       
+      // If no workflowId, return original status
+      if (!wfId) {
+        console.warn('⚠️ No workflowId for item, returning original status:', {
+          itemId: item.id,
+          itemName: item.name,
+          status: currentStatus
+        });
+        return currentStatus;
+      }
+
+      // Check if workflows are loaded
+      if (!workflows || workflows.length === 0) {
+        console.warn('⚠️ Workflows not loaded yet, returning original status. Will retry when workflows load:', {
+          itemId: item.id,
+          itemName: item.name,
+          status: currentStatus,
+          workflowId: wfId,
+          workflowsCount: workflows?.length || 0
+        });
+        return currentStatus; // Return original, items will be recomputed when workflows load
+      }
+
+      // Find workflow
+      const wf = workflows.find(w => w && w.id === wfId);
+      if (!wf) {
+        console.warn('⚠️ Workflow not found in workflows state:', {
+          itemId: item.id,
+          itemName: item.name,
+          status: currentStatus,
+          workflowId: wfId,
+          availableWorkflowIds: workflows.map(w => w.id),
+          workflowsCount: workflows.length
+        });
+        return currentStatus;
+      }
+
       // If status is already a UUID, check if it exists in workflow stages
       if (isUUID(currentStatus)) {
-        if (wfId) {
-          const wf = (workflows || []).find(w => w && w.id === wfId);
-          if (wf && wf.stages) {
-            const stageExists = wf.stages.some(s => s.id === currentStatus);
-            if (stageExists) {
-              return currentStatus; // Valid UUID that exists in workflow
-            }
+        if (wf.stages) {
+          const stageExists = wf.stages.some(s => s.id === currentStatus);
+          if (stageExists) {
+            return currentStatus; // Valid UUID that exists in workflow
           }
         }
         // UUID exists but not in workflow, will normalize to first stage below
       } else {
         // Status is not a UUID - try to match by stage name first
-        if (wfId) {
-          const wf = (workflows || []).find(w => w && w.id === wfId);
-          if (wf && wf.stages) {
-            // Try to find stage by name (case-insensitive)
-            const statusLower = currentStatus.toLowerCase().trim();
-            const matchingStage = wf.stages.find(s => {
-              const stageNameLower = (s.name || '').toLowerCase().trim();
-              return stageNameLower === statusLower || s.id.toLowerCase() === statusLower;
+        if (wf.stages && wf.stages.length > 0) {
+          const statusLower = currentStatus.toLowerCase().trim();
+          const matchingStage = wf.stages.find(s => {
+            const stageNameLower = (s.name || '').toLowerCase().trim();
+            return stageNameLower === statusLower || s.id.toLowerCase() === statusLower;
+          });
+          if (matchingStage) {
+            console.log('✅ Found stage by name match:', {
+              oldStatus: currentStatus,
+              newStatus: matchingStage.id,
+              stageName: matchingStage.name,
+              workflowId: wfId,
+              workflowName: wf.label
             });
-            if (matchingStage) {
-              console.log('✅ Found stage by name match:', {
-                oldStatus: currentStatus,
-                newStatus: matchingStage.id,
-                stageName: matchingStage.name,
-                workflowId: wfId,
-                workflowName: wf.label
-              });
-              return matchingStage.id;
-            }
+            return matchingStage.id;
           }
         }
       }
 
       // Status is not a UUID or doesn't match any stage, get first stage UUID
-      if (wfId) {
-        const wf = (workflows || []).find(w => w && w.id === wfId);
-        if (wf && wf.stages && wf.stages.length > 0) {
-          const sortedStages = [...wf.stages].sort((a, b) => a.order - b.order);
-          const firstStageId = sortedStages[0].id;
-          console.log('🔄 Normalizing status to first stage:', {
-            oldStatus: currentStatus,
-            newStatus: firstStageId,
-            workflowId: wfId,
-            workflowName: wf.label,
-            stageName: sortedStages[0].name
-          });
-          return firstStageId;
-        }
+      if (wf.stages && wf.stages.length > 0) {
+        const sortedStages = [...wf.stages].sort((a, b) => (a.order || 0) - (b.order || 0));
+        const firstStageId = sortedStages[0].id;
+        console.log('🔄 Normalizing status to first stage:', {
+          oldStatus: currentStatus,
+          newStatus: firstStageId,
+          workflowId: wfId,
+          workflowName: wf.label,
+          stageName: sortedStages[0].name
+        });
+        return firstStageId;
       }
 
-      // Fallback: return original status if no workflow found
-      console.warn('⚠️ Could not normalize status, no workflow found:', {
+      // Fallback: return original status if workflow has no stages
+      console.warn('⚠️ Workflow found but has no stages:', {
         itemId: item.id,
+        itemName: item.name,
         status: currentStatus,
-        workflowId: wfId
+        workflowId: wfId,
+        workflowName: wf.label,
+        stagesCount: wf.stages?.length || 0
       });
       return currentStatus;
     };
@@ -715,7 +891,7 @@ export const KanbanBoard: React.FC = () => {
         });
     });
 
-    console.log('Kanban items:', {
+    console.log('📦 Kanban items created:', {
       totalOrders: orders.length,
       totalItems: allItems.length,
       items: allItems.map(i => ({
@@ -727,9 +903,12 @@ export const KanbanBoard: React.FC = () => {
         workflowId: i.workflowId,
         serviceId: i.serviceId,
         isProduct: i.isProduct,
-        history: i.history,
-        fullItem: i
-      }))
+        hasHistory: !!(i.history && i.history.length > 0)
+      })),
+      itemsWithoutWorkflow: allItems.filter(i => !i.workflowId && !i.serviceId).length,
+      itemsWithWorkflowId: allItems.filter(i => !!i.workflowId).length,
+      itemsWithServiceId: allItems.filter(i => !!i.serviceId).length,
+      availableWorkflows: (workflows || []).map(w => ({ id: w.id, label: w.label, stagesCount: w.stages?.length || 0 }))
     });
 
     return allItems;
@@ -1235,8 +1414,13 @@ export const KanbanBoard: React.FC = () => {
         orderId: i.orderId,
         name: i.name,
         workflowId: i.workflowId,
-        serviceId: i.serviceId
-      }))
+        serviceId: i.serviceId,
+        status: i.status,
+        type: i.type
+      })),
+      itemsWithWorkflowId: items.filter(i => !!i.workflowId).length,
+      itemsWithServiceId: items.filter(i => !!i.serviceId).length,
+      itemsWithoutBoth: items.filter(i => !i.workflowId && !i.serviceId).length
     });
 
     // First filter by selected orders if any
@@ -1335,6 +1519,15 @@ export const KanbanBoard: React.FC = () => {
   };
 
   const renderCard = (item: KanbanItem) => {
+    console.log('🎴 Rendering card for item:', {
+      itemId: item.id,
+      itemName: item.name,
+      workflowId: item.workflowId,
+      serviceId: item.serviceId,
+      status: item.status,
+      orderId: item.orderId
+    });
+
     const getStageName = (statusId: string) => {
       const stage = workflows.flatMap(wf => wf.stages || []).find(s => s.id === statusId);
       if (stage) return stage.name;
@@ -1345,9 +1538,74 @@ export const KanbanBoard: React.FC = () => {
       return statusId;
     };
 
-    const wf = (workflows || []).find(w => w && w.id === item.workflowId);
+    // Find workflow by item.workflowId - try multiple ways
+    let wf = (workflows || []).find(w => w && w.id === item.workflowId);
+    
+    console.log('🔍 Finding workflow for item:', {
+      itemId: item.id,
+      itemWorkflowId: item.workflowId,
+      itemServiceId: item.serviceId,
+      workflowsCount: workflows.length,
+      workflowFound: !!wf,
+      workflowLabel: wf?.label
+    });
+    
+    // If workflow not found, try to find by serviceId
+    if (!wf && item.serviceId) {
+      const service = (services || []).find(s => s && s.id === item.serviceId);
+      if (service) {
+        // Try workflows from service
+        if (service.workflows && Array.isArray(service.workflows) && service.workflows.length > 0) {
+          for (const wfRef of service.workflows) {
+            const workflowId = typeof wfRef === 'string' ? wfRef : (wfRef?.id || '');
+            wf = (workflows || []).find(w => w && w.id === workflowId);
+            if (wf) break;
+          }
+        }
+        // Try workflowId from service
+        if (!wf && service.workflowId) {
+          const workflowId = typeof service.workflowId === 'string' ? service.workflowId : (service.workflowId[0] || '');
+          wf = (workflows || []).find(w => w && w.id === workflowId);
+        }
+      }
+    }
+    
     const currentStage = wf?.stages?.find(s => s.id === item.status);
-    const allStages = wf?.stages ? [...wf.stages].sort((a, b) => a.order - b.order) : [];
+    const allStages = wf?.stages && Array.isArray(wf.stages) && wf.stages.length > 0 
+      ? [...wf.stages].sort((a, b) => (a.order || 0) - (b.order || 0)) 
+      : [];
+    
+    // Debug: Log workflow and stages info
+    if (!wf || !wf.stages || wf.stages.length === 0) {
+      console.warn('⚠️ Workflow không có stages:', {
+        itemId: item.id,
+        itemName: item.name,
+        itemWorkflowId: item.workflowId,
+        itemServiceId: item.serviceId,
+        itemStatus: item.status,
+        workflowFound: !!wf,
+        workflowLabel: wf?.label,
+        stagesCount: wf?.stages?.length || 0,
+        allStagesCount: allStages.length,
+        workflowsCount: workflows.length,
+        workflowsWithStages: workflows.filter(w => w.stages && w.stages.length > 0).map(w => ({
+          id: w.id,
+          label: w.label,
+          stagesCount: w.stages?.length || 0
+        }))
+      });
+    } else {
+      console.log('✅ Workflow có stages:', {
+        itemId: item.id,
+        itemName: item.name,
+        workflowId: wf.id,
+        workflowLabel: wf.label,
+        stagesCount: allStages.length,
+        stages: allStages.map(s => ({ id: s.id, name: s.name, order: s.order })),
+        currentStageId: item.status,
+        currentStageName: currentStage?.name
+      });
+    }
 
     return (
       <div
@@ -1447,59 +1705,80 @@ export const KanbanBoard: React.FC = () => {
             </div>
           )}
 
-          {/* Workflow Stages Progress */}
-          {allStages.length > 0 && (
-            <div className="mb-3">
-              <div className="flex items-center gap-1 overflow-x-auto pb-1" style={{ scrollbarWidth: 'none', msOverflowStyle: 'none' }}>
-                {allStages.map((stage, idx) => {
-                  const isCompleted = item.history?.some(h => h.stageId === stage.id) || false;
-                  const isCurrent = stage.id === item.status;
-                  const isUpcoming = !isCompleted && !isCurrent;
-                  const stageMembers = stage.assignedMembers || [];
+          {/* Workflow Stages Progress - ALWAYS SHOW if workflow exists */}
+          {wf ? (
+            <div className="mb-3 pt-2 border-t border-neutral-800/60">
+              {allStages.length > 0 ? (
+                <div className="space-y-2">
+                  <div className="text-[9px] text-slate-500 uppercase tracking-wider font-medium px-1 flex items-center gap-1">
+                    <Columns size={10} />
+                    Các bước quy trình ({allStages.length})
+                  </div>
+                  <div className="flex items-center gap-1 overflow-x-auto pb-1 px-1" style={{ scrollbarWidth: 'none', msOverflowStyle: 'none' }}>
+                    {allStages.map((stage, idx) => {
+                      const isCompleted = item.history?.some(h => h.stageId === stage.id) || false;
+                      const isCurrent = stage.id === item.status;
+                      const isUpcoming = !isCompleted && !isCurrent;
+                      const stageMembers = stage.assignedMembers || [];
 
-                  return (
-                    <React.Fragment key={stage.id}>
-                      <div className={`flex-shrink-0 px-2.5 py-1.5 rounded-lg text-[10px] font-medium transition-all relative group ${isCurrent
-                          ? 'bg-gold-600/20 text-gold-400 border border-gold-500/50 shadow-sm shadow-gold-500/20'
-                          : isCompleted
-                            ? 'bg-emerald-900/20 text-emerald-400 border border-emerald-700/30'
-                            : 'bg-neutral-800/40 text-slate-500 border border-neutral-700/30'
-                        }`}>
-                        <span className="line-clamp-1 max-w-[80px]">{stage.name}</span>
-                        {stageMembers.length > 0 && (
-                          <div className="absolute -bottom-6 left-0 right-0 hidden group-hover:block z-20">
-                            <div className="bg-neutral-800 rounded-lg p-2 border border-neutral-700 shadow-lg min-w-[120px]">
-                              <div className="text-[9px] text-slate-400 mb-1">Nhân sự:</div>
-                              <div className="flex flex-wrap gap-1">
-                                {stageMembers.map(memberId => {
-                                  const member = members.find(m => m.id === memberId);
-                                  if (!member) return null;
-                                  return (
-                                    <div key={memberId} className="flex items-center gap-1">
-                                      {member.avatar ? (
-                                        <img src={member.avatar} alt="" className="w-3 h-3 rounded-full" />
-                                      ) : (
-                                        <div className="w-3 h-3 rounded-full bg-neutral-600 flex items-center justify-center text-[7px] font-bold text-slate-300">
-                                          {member.name.charAt(0).toUpperCase()}
-                                        </div>
-                                      )}
-                                      <span className="text-[9px] text-slate-300">{member.name}</span>
-                                    </div>
-                                  );
-                                })}
+                    return (
+                      <React.Fragment key={stage.id || idx}>
+                        <div className={`flex-shrink-0 px-2.5 py-1.5 rounded-lg text-[10px] font-medium transition-all relative group ${isCurrent
+                            ? 'bg-gold-600/20 text-gold-400 border border-gold-500/50 shadow-sm shadow-gold-500/20'
+                            : isCompleted
+                              ? 'bg-emerald-900/20 text-emerald-400 border border-emerald-700/30'
+                              : 'bg-neutral-800/40 text-slate-500 border border-neutral-700/30'
+                          }`}>
+                          <div className="flex items-center gap-1.5">
+                            <span className="text-[9px] text-slate-400 font-bold">#{stage.order || idx + 1}</span>
+                            <span className="line-clamp-1 max-w-[90px]">{stage.name}</span>
+                          </div>
+                          {stageMembers.length > 0 && (
+                            <div className="absolute -bottom-6 left-0 right-0 hidden group-hover:block z-20">
+                              <div className="bg-neutral-800 rounded-lg p-2 border border-neutral-700 shadow-lg min-w-[120px]">
+                                <div className="text-[9px] text-slate-400 mb-1">Nhân sự:</div>
+                                <div className="flex flex-wrap gap-1">
+                                  {stageMembers.map(memberId => {
+                                    const member = members.find(m => m.id === memberId);
+                                    if (!member) return null;
+                                    return (
+                                      <div key={memberId} className="flex items-center gap-1">
+                                        {member.avatar ? (
+                                          <img src={member.avatar} alt="" className="w-3 h-3 rounded-full" />
+                                        ) : (
+                                          <div className="w-3 h-3 rounded-full bg-neutral-600 flex items-center justify-center text-[7px] font-bold text-slate-300">
+                                            {member.name.charAt(0).toUpperCase()}
+                                          </div>
+                                        )}
+                                        <span className="text-[9px] text-slate-300">{member.name}</span>
+                                      </div>
+                                    );
+                                  })}
+                                </div>
                               </div>
                             </div>
-                          </div>
+                          )}
+                        </div>
+                        {idx < allStages.length - 1 && (
+                          <ChevronRight size={12} className={`flex-shrink-0 mx-0.5 ${isCompleted ? 'text-emerald-600' : isCurrent ? 'text-gold-500' : 'text-slate-700'
+                            }`} />
                         )}
-                      </div>
-                      {idx < allStages.length - 1 && (
-                        <ChevronRight size={12} className={`flex-shrink-0 mx-0.5 ${isCompleted ? 'text-emerald-600' : isCurrent ? 'text-gold-500' : 'text-slate-700'
-                          }`} />
-                      )}
-                    </React.Fragment>
-                  );
-                })}
-              </div>
+                      </React.Fragment>
+                    );
+                  })}
+                  </div>
+                </div>
+              ) : (
+                <div className="text-center py-2 text-xs text-slate-500 bg-neutral-800/30 rounded-lg border border-neutral-700/30">
+                  <div className="text-[9px] text-slate-400 mb-1">Quy trình: {wf.label}</div>
+                  <div>Chưa có bước nào được thiết lập</div>
+                </div>
+              )}
+            </div>
+          ) : (
+            <div className="mb-3 pt-2 border-t border-neutral-800/60 text-center py-2 text-xs text-slate-500 bg-neutral-800/30 rounded-lg border border-neutral-700/30">
+              <div className="text-[9px] text-slate-400 mb-1">Chưa có quy trình</div>
+              <div>Dịch vụ này chưa được gán quy trình</div>
             </div>
           )}
 
@@ -1552,11 +1831,11 @@ export const KanbanBoard: React.FC = () => {
               <Calendar size={12} className="text-slate-500" />
               <span className="text-[11px]">
                 <span className="text-slate-500">Ngày hẹn:</span>{' '}
-                <span className="text-slate-200 font-medium">{item.expectedDelivery || 'Chưa có'}</span>
+                <span className="text-slate-200 font-medium">{formatDate(item.expectedDelivery) || 'Chưa có'}</span>
               </span>
             </div>
             <div className="text-right">
-              <div className="text-sm font-bold text-gold-400">{item.price.toLocaleString()} ₫</div>
+              <div className="text-sm font-bold text-gold-400">{item.price.toLocaleString('vi-VN')} ₫</div>
               {item.lastUpdated && (
                 <div className="text-[10px] text-slate-500 flex items-center justify-end gap-1 mt-0.5">
                   <Clock size={9} />
@@ -1579,9 +1858,25 @@ export const KanbanBoard: React.FC = () => {
       filteredItems: filteredItems.length,
       activeWorkflow,
       workflowsCount: workflows.length,
+      workflowsWithStages: workflows.filter(w => w.stages && w.stages.length > 0).length,
       servicesCount: services.length,
       ordersWithItems: safeOrders.filter(o => o.items && o.items.length > 0).length,
-      ordersWithoutItems: safeOrders.filter(o => !o.items || o.items.length === 0).length
+      ordersWithoutItems: safeOrders.filter(o => !o.items || o.items.length === 0).length,
+      itemsWithWorkflowId: items.filter(i => !!i.workflowId).length,
+      itemsWithServiceId: items.filter(i => !!i.serviceId).length,
+      itemsWithoutBoth: items.filter(i => !i.workflowId && !i.serviceId).length,
+      sampleItems: items.slice(0, 3).map(i => ({
+        id: i.id,
+        name: i.name,
+        workflowId: i.workflowId,
+        serviceId: i.serviceId,
+        status: i.status
+      })),
+      workflows: workflows.map(w => ({
+        id: w.id,
+        label: w.label,
+        stagesCount: w.stages?.length || 0
+      }))
     });
   }, [safeOrders.length, selectedOrderIds.size, items.length, filteredItems.length, activeWorkflow, workflows.length, services.length]);
 
@@ -1834,13 +2129,12 @@ export const KanbanBoard: React.FC = () => {
 
                         {/* Order Info Column (Sticky Right) */}
                         <div className="w-[200px] flex-shrink-0 p-3 bg-neutral-900/95 border-l border-neutral-800 flex flex-col justify-center sticky right-0 z-10 shadow-[-5px_0_15px_-5px_rgba(0,0,0,0.5)] ml-auto">
-                          <h3 className="text-xl font-serif font-bold text-gold-500 mb-1">#{orderId}</h3>
                           <p className="text-slate-300 font-medium text-lg mb-2">{firstItem.customerName}</p>
 
                           <div className="flex flex-col gap-2 mt-2">
                             <div className="flex items-center gap-2 text-sm text-slate-400">
                               <Calendar size={14} />
-                              <span>Ngày hẹn: <span className="text-slate-300">{firstItem.expectedDelivery}</span></span>
+                              <span>Ngày hẹn: <span className="text-slate-300">{formatDate(firstItem.expectedDelivery)}</span></span>
                             </div>
                             <div className="flex items-center gap-2 text-sm text-slate-400">
                               <Briefcase size={14} />
